@@ -1,0 +1,13 @@
+name: jstmc
+channels:
+  - defaults
+  - conda-forge
+  - anaconda
+dependencies:
+  - pandas=1.4.1
+  - matplotlib=3.5.1
+  - simple-parsing=0.0.19
+  - jupyter=1.0.0
+  - numpy=1.21
+  - python=3.8
+  - pathtools=0.1.2
