@@ -19,7 +19,7 @@ def pretty_plot_et(seq: options.Sequence, save: Path = "", plot_blips: bool = Fa
     # leave first x free
     t_cum = 0
     # build x ax
-    x_arr = np.arange(-t_cum, t_total)
+    x_arr = np.arange(-t_cum, int(t_total))
     # init arrays
     arr_rf = np.zeros((2, len(x_arr)))  # [amplitude,phase]
     arr_g = np.zeros((3, len(x_arr)))  # [gx, gy, gz]
@@ -48,23 +48,23 @@ def pretty_plot_et(seq: options.Sequence, save: Path = "", plot_blips: bool = Fa
 
     # find starting idx
     start_idx = 0
-    for block_idx in range(len(seq.ppSeq.arr_block_durations)):
-        t_cum += 1e6 * seq.ppSeq.arr_block_durations[block_idx]
+    for block_idx in range(len(seq.ppSeq.block_durations)):
+        t_cum += 1e6 * seq.ppSeq.block_durations[block_idx]
         if t_cum > t_start:
             start_idx = block_idx
             block = seq.ppSeq.get_block(block_idx + 1)
             # check if we found excitation pulse, ie. start of echo train
-            if hasattr(block, 'rf'):
+            if getattr(block, "rf") is not None:
                 if block.rf.use == "excitation":
                     break
     t_cum = 0
-    for block_idx in np.arange(start_idx, len(seq.ppSeq.arr_block_durations)):
+    for block_idx in np.arange(start_idx, len(seq.ppSeq.block_durations)):
         t0 = t_cum
         block = seq.ppSeq.get_block(block_idx + 1)
-        if t_cum + 1e6 * seq.ppSeq.arr_block_durations[block_idx] > t_total:
+        if t_cum + 1e6 * seq.ppSeq.block_durations[block_idx] > t_total:
             break
 
-        if hasattr(block, 'rf'):
+        if getattr(block, 'rf') is not None:
             rf = block.rf
             delay = int(1e6 * rf.delay)
             start = t0 + delay
@@ -77,7 +77,7 @@ def pretty_plot_et(seq: options.Sequence, save: Path = "", plot_blips: bool = Fa
 
         grad_channels = ['gx', 'gy', 'gz']
         for x in range(len(grad_channels)):
-            if hasattr(block, grad_channels[x]):
+            if getattr(block, grad_channels[x]) is not None:
                 grad = getattr(block, grad_channels[x])
                 if grad.type == 'trap':
                     amp_value = 1e3 * grad.amplitude / seq.specs.gamma
@@ -94,11 +94,17 @@ def pretty_plot_et(seq: options.Sequence, save: Path = "", plot_blips: bool = Fa
                         block_end = end
                 if grad.type == 'grad':
                     start = int(t0 + 1e6 * grad.delay)
-                    end = int(start + 1e6 * (grad.t[-1] - grad.t[0] + np.diff(grad.t)[0]))
-                    wf = np.repeat(1e3 * grad.waveform / seq.specs.gamma, int(seq.specs.grad_raster_time / 1e-6))
+                    end = int(start + 1e6 * grad.shape_dur)
+                    wf = np.zeros(end - start)
+                    for idx_t in range(len(grad.tt) - 1):
+                        idx_start = int(grad.tt[idx_t] * 1e6)
+                        idx_end = int(grad.tt[idx_t+1] * 1e6)
+                        val_start = 1e3 * grad.waveform[idx_t] / seq.specs.gamma
+                        val_end = 1e3 * grad.waveform[idx_t+1] / seq.specs.gamma
+                        wf[idx_start:idx_end] = np.linspace(val_start, val_end, idx_end - idx_start)
                     arr_g[x, start:end] = wf
         # %%
-        if hasattr(block, 'adc'):
+        if getattr(block, 'adc') is not None:
             adc = block.adc
             start = int(t0 + 1e6*adc.delay)
             end = start + int(adc.num_samples * adc.dwell * 1e6)
