@@ -72,7 +72,6 @@ class SequenceParameters(helpers.Serializable):
     TR: float = 4500.0  # [ms]
 
     bandwidth: float = 302.0  # [Hz / px]
-    rise_time_grad: int = 5e-4  # optional, fixing rise time
 
     def __post_init__(self):
         # resolution
@@ -81,9 +80,9 @@ class SequenceParameters(helpers.Serializable):
         self.resolutionVoxelSizeRead = self.resolutionFovRead / self.resolutionBase  # [mm]
         self.resolutionVoxelSizePhase = self.resolutionFovRead / self.resolutionBase  # [mm]
         self.deltaK = 1e3 / self.resolutionFovRead  # cast to m
-        # sequence
         self.TE = np.arange(1, self.ETL + 1) * self.ESP  # [ms] echo times
-        self.acquisitionTime = np.ceil(1e6 / self.bandwidth) * 1e-6
+        # sequence
+        self.acquisitionTime = 1 / self.bandwidth
         self.dwell = self.acquisitionTime / self.resolutionNRead
         logModule.info(f"Bandwidth: {self.bandwidth:.1f} Hz/px;"
                        f"Readout time: {self.acquisitionTime * 1e3:.1f} ms;"
@@ -108,6 +107,13 @@ class SequenceParameters(helpers.Serializable):
         fov_phase = 1e-3 * int(self.resolutionFovRead * self.resolutionFovPhase / 100)
         fov_slice = self.resolutionSliceThickness * 1e-3
         return fov_read, fov_phase, fov_slice
+
+    def set_esp(self, esp: float):
+        if esp < 1.0:
+            self.ESP = 1e3 * esp
+        else:
+            self.ESP = esp
+        self.TE = np.arange(1, self.ETL+1) * self.ESP
 
 
 @dataclass
@@ -141,7 +147,7 @@ class Sequence:
         return Seq
 
     def save(self):
-        if not self.ppSeq.dict_definitions:
+        if not self.ppSeq.definitions:
             err = "no export definitions were set (FOV, Name)"
             logModule.error(err)
             raise AttributeError(err)
