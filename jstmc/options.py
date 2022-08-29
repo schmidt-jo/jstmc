@@ -1,4 +1,6 @@
 import logging
+import types
+
 import numpy as np
 from simple_parsing import ArgumentParser, helpers
 from dataclasses import dataclass
@@ -146,7 +148,7 @@ class Sequence:
 
         return Seq
 
-    def save(self):
+    def save(self, emc_info: dict = None):
         if not self.ppSeq.definitions:
             err = "no export definitions were set (FOV, Name)"
             logModule.error(err)
@@ -172,10 +174,11 @@ class Sequence:
             logModule.info(f"writing file: {save_file}")
             with open(save_file, "w") as j_file:
                 json.dump(save_dict, j_file, indent=2)
-            save_file = path.joinpath(f"jstmc{self.config.version}_emc_sequence_conf.json")
-            logModule.info(f"writing file: {save_file}")
-            with open(save_file, "w") as j_file:
-                json.dump(self.emc_dict, j_file, indent=2)
+            if emc_info is not None:
+                save_file = path.joinpath(f"jstmc{self.config.version}_emc_sequence_conf.json")
+                logModule.info(f"writing file: {save_file}")
+                with open(save_file, "w") as j_file:
+                    json.dump(emc_info, j_file, indent=2)
         else:
             logModule.info("Not Saving: no Path given")
 

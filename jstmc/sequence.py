@@ -374,8 +374,8 @@ class SequenceBlockEvents:
         numSlices = self.seq.params.resolutionNumSlices
         self.z = np.zeros((2, int(np.ceil(numSlices / 2))))
 
-    def _write_emc_info(self):
-        self.seq.emc_dict = {
+    def _write_emc_info(self) -> dict:
+        emc_dict = {
             "gammaHz": self.seq.specs.gamma,
             "gammaPi": self.seq.specs.gamma * 2 * np.pi,
             "ETL": self.seq.params.ETL,
@@ -402,6 +402,7 @@ class SequenceBlockEvents:
             "durationRefocusVerse1": 0.0,
             "durationRefocusVerse2": 0.0
         }
+        return emc_dict
 
     def _calculate_min_esp(self):
         # find minimal echo spacing
@@ -604,3 +605,6 @@ class SequenceBlockEvents:
         # write info into seq obj
         self._write_emc_info()
         return self.seq
+
+    def get_emc_info(self) -> dict:
+        return self._write_emc_info()

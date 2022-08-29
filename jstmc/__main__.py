@@ -17,6 +17,7 @@ def main():
 
     sbe = sequence.SequenceBlockEvents(seq=seq)
     sbe.build()
+    emc_info = sbe.get_emc_info()
     seq = sbe.get_seq()
 
     scan_time = np.sum(seq.ppSeq.block_durations)
@@ -33,7 +34,7 @@ def main():
         for err_rep_item in err_rep:
             w_file.write(f"{str(err_rep_item)}\n")
 
-    seq.save()
+    seq.save(emc_info=emc_info)
     logging.info(f".seq set definitions: {seq.ppSeq.definitions}")
 
     logging.info("Plotting")
