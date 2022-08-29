@@ -172,6 +172,10 @@ class Sequence:
             logModule.info(f"writing file: {save_file}")
             with open(save_file, "w") as j_file:
                 json.dump(save_dict, j_file, indent=2)
+            save_file = path.joinpath(f"jstmc{self.config.version}_emc_sequence_conf.json")
+            logModule.info(f"writing file: {save_file}")
+            with open(save_file, "w") as j_file:
+                json.dump(self.emc_dict, j_file, indent=2)
         else:
             logModule.info("Not Saving: no Path given")
 
