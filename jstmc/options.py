@@ -55,6 +55,7 @@ class SequenceParameters(helpers.Serializable):
 
     numberOfCentralLines: int = 24
     accelerationFactor: int = 4
+    partialFourier: float = 6/8
     useAcc: bool = False
 
     excitationFA: float = 90.0
@@ -129,6 +130,12 @@ class Sequence:
     @classmethod
     def from_cmd_args(cls, prog_args: ArgumentParser.parse_args):
         Seq = Sequence(specs=prog_args.specs, params=prog_args.params, config=prog_args.config)
+        if prog_args.config.configFile:
+            with open(prog_args.config.configFile, "r") as j_file:
+                load_dict = json.load(j_file)
+            Seq.config = SequenceConfig.from_dict(load_dict["config"])
+            Seq.params = SequenceParameters.from_dict(load_dict["params"])
+            Seq.specs = ScannerSpecs.from_dict(load_dict["specs"])
         system = pp.Opts(
             adc_dead_time=prog_args.specs.adc_dead_time,
             gamma=prog_args.specs.gamma,

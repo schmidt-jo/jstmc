@@ -474,7 +474,8 @@ class SequenceBlockEvents:
         # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
         # -> acceleration increases with number of contrasts
         k_end_low = self.k_start - self.seq.params.ETL
-        k_end_high = self.seq.params.resolutionNPhase - self.seq.params.ETL
+        # use partial fourier 6/8 -> aka 3/4
+        k_end_high = int(self.seq.params.partialFourier * self.seq.params.resolutionNPhase) - self.seq.params.ETL
         # calculate indexes
         self.k_indexes = np.concatenate((np.arange(0, k_end_low, self.seq.params.accelerationFactor),
                                          np.arange(self.k_end, k_end_high, self.seq.params.accelerationFactor)))
