@@ -4,7 +4,6 @@ from jstmc import options
 import numpy as np
 import pypulseq as pp
 import tqdm
-import copy
 
 logModule = logging.getLogger(__name__)
 
@@ -239,9 +238,9 @@ class SliceGradPulse:
         # we want to interpolate between the slice selection ramp down and the rephasing ramp up
         t_rd_ru = self.slice_grad.fall_time + self.slice_grad_re_spoil.rise_time
         interpol_gradient = (self.slice_grad_re_spoil.amplitude - self.slice_grad.amplitude) / t_rd_ru * \
-                            self.rf.ringdown_time + self.slice_grad.amplitude
+                             self.rf.ringdown_time + self.slice_grad.amplitude
         interpol_gradient_rd_pre = (self.slice_grad_re_spoil.amplitude - self.slice_grad.amplitude) / t_rd_ru * \
-                            self.rf.delay + self.slice_grad.amplitude
+                                    self.rf.delay + self.slice_grad.amplitude
 
         rise = self.rf.delay
         amp = self.slice_grad.amplitude
@@ -370,6 +369,7 @@ class SequenceBlockEvents:
         self.k_start: int = -1
         self.k_end: int = -1
         self.k_indexes: np.ndarray = np.zeros(0)
+        self.sampling_pattern: list = []
         # slice loop
         numSlices = self.seq.params.resolutionNumSlices
         self.z = np.zeros((2, int(np.ceil(numSlices / 2))))
@@ -403,6 +403,9 @@ class SequenceBlockEvents:
             "durationRefocusVerse2": 0.0
         }
         return emc_dict
+
+    def get_sampling_pattern(self) -> list:
+        return self.sampling_pattern
 
     def _calculate_min_esp(self):
         # find minimal echo spacing
@@ -473,9 +476,9 @@ class SequenceBlockEvents:
 
         # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
         # -> acceleration increases with number of contrasts
-        k_end_low = self.k_start - self.seq.params.ETL
+        k_end_low = self.k_start - self.seq.params.ETL + 1
         # use partial fourier 6/8 -> aka 3/4
-        k_end_high = int(self.seq.params.partialFourier * self.seq.params.resolutionNPhase) - self.seq.params.ETL
+        k_end_high = int(self.seq.params.partialFourier * self.seq.params.resolutionNPhase) - self.seq.params.ETL + 1
         # calculate indexes
         self.k_indexes = np.concatenate((np.arange(0, k_end_low, self.seq.params.accelerationFactor),
                                          np.arange(self.k_end, k_end_high, self.seq.params.accelerationFactor)))
@@ -490,7 +493,7 @@ class SequenceBlockEvents:
         # reshuffle slices mid+1, 1, mid+2, 2, ...
         self.z = self.z.transpose().flatten()[:numSlices]
 
-    def _add_blocks_excitation_first_read(self, phase_idx: int):
+    def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
         # set phase grads
         self.acquisition.set_phase_grads(idx_phase=phase_idx)
 
@@ -513,7 +516,11 @@ class SequenceBlockEvents:
         # read
         self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
-    def _add_blocks_refocusing_adc(self, phase_idx: int, tse_style: bool = False):
+        # write sampling pattern
+        sampling_index = {"pe_num": phase_idx, "slice_num": slice_idx, "echo_num": 0}
+        self.sampling_pattern.append(sampling_index)
+
+    def _add_blocks_refocusing_adc(self, phase_idx: int, slice_idx: int, tse_style: bool = False):
         for contrast_idx in np.arange(1, self.seq.params.ETL):
             # delay if necessary
             if self.refocusing.delay.delay > 1e-6:
@@ -537,6 +544,10 @@ class SequenceBlockEvents:
             # read
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
+            # write sampling pattern
+            sampling_index = {"pe_num": idx_phase, "slice_num": slice_idx, "echo_num": contrast_idx}
+            self.sampling_pattern.append(sampling_index)
+
         # spoil end
         self.seq.ppSeq.add_block(
             self.acquisition.phase_grad_post_adc,
@@ -550,6 +561,8 @@ class SequenceBlockEvents:
         # through phase encodes
         line_bar = tqdm.trange(self.seq.params.numberOfCentralLines, desc="phase encodes")
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
+            # we start at lower end and move through central lines
+            idx_phase = self.k_start + idx_n
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
                 freq_offset = self.excitation.slice_grad.amplitude * self.z[idx_slice]
@@ -558,13 +571,11 @@ class SequenceBlockEvents:
                 freq_offset = self.refocusing.slice_grad.amplitude * self.z[idx_slice]
                 self.refocusing.rf.freq_offset = freq_offset
 
-                # we start at lower end and move through central lines
-                idx_phase = self.k_start + idx_n
                 # excitation to first read
-                self._add_blocks_excitation_first_read(phase_idx=idx_phase)
+                self._add_blocks_excitation_first_read(phase_idx=idx_phase, slice_idx=idx_slice)
 
                 # refocusing blocks
-                self._add_blocks_refocusing_adc(phase_idx=idx_phase, tse_style=False)
+                self._add_blocks_refocusing_adc(phase_idx=idx_phase, slice_idx=idx_slice, tse_style=False)
 
     def _loop_acc_tse(self):
         logModule.info(f"TSE acc lines")
@@ -584,10 +595,10 @@ class SequenceBlockEvents:
                 # for idx_slice in range(num_slices):
                 idx_phase = self.k_indexes[idx_n]
                 # add blocks excitation til first read
-                self._add_blocks_excitation_first_read(phase_idx=idx_phase)
+                self._add_blocks_excitation_first_read(phase_idx=idx_phase, slice_idx=idx_slice)
 
                 # add blocks for refocussing pulses, tse style
-                self._add_blocks_refocusing_adc(phase_idx=idx_phase, tse_style=True)
+                self._add_blocks_refocusing_adc(phase_idx=idx_phase, slice_idx=idx_slice, tse_style=True)
 
     def build(self):
         # calculate number of slices

@@ -1,4 +1,4 @@
-from jstmc import options, sequence, utils
+from jstmc import options, sequence, sar
 import numpy as np
 import logging
 from pathlib import Path
@@ -18,10 +18,15 @@ def main():
     sbe = sequence.SequenceBlockEvents(seq=seq)
     sbe.build()
     emc_info = sbe.get_emc_info()
+    sampling_pattern = sbe.get_sampling_pattern()
     seq = sbe.get_seq()
+    seq.write_sampling_pattern(sampling_pattern=sampling_pattern)
 
     scan_time = np.sum(seq.ppSeq.block_durations)
     logging.info(f"Total Scan Time: {scan_time / 60:.1f} min")
+
+    logging.info(f"SAR calculations")
+    sar.calc_sar(seq=seq)
 
     logging.info("Verifying and Writing Files")
     # verifying
@@ -34,7 +39,7 @@ def main():
         for err_rep_item in err_rep:
             w_file.write(f"{str(err_rep_item)}\n")
 
-    seq.save(emc_info=emc_info)
+    seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern)
     logging.info(f".seq set definitions: {seq.ppSeq.definitions}")
 
     logging.info("Plotting")

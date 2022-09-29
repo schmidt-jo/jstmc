@@ -1,5 +1,4 @@
 import logging
-import types
 
 import numpy as np
 from simple_parsing import ArgumentParser, helpers
@@ -7,6 +6,7 @@ from dataclasses import dataclass
 import pypulseq as pp
 from pathlib import Path
 import json
+import pandas as pd
 
 logModule = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class SequenceParameters(helpers.Serializable):
     resolutionFovPhase: float = 100.0  # [%]
     resolutionBase: int = 394
     resolutionSliceThickness: float = 0.65  # [mm]
-    resolutionNumSlices: int = 20
+    resolutionNumSlices: int = 55
     resolutionSliceGap: int = 0  # %
 
     numberOfCentralLines: int = 24
@@ -106,9 +106,9 @@ class SequenceParameters(helpers.Serializable):
         return self.resolutionVoxelSizeRead, self.resolutionVoxelSizePhase, self.resolutionSliceThickness
 
     def get_fov(self):
-        fov_read = 1e-3 * self.resolutionFovRead
-        fov_phase = 1e-3 * int(self.resolutionFovRead * self.resolutionFovPhase / 100)
-        fov_slice = self.resolutionSliceThickness * 1e-3
+        fov_read = 1e-3 * self.resolutionFovRead / 64
+        fov_phase = int(fov_read * self.resolutionFovPhase / 100)
+        fov_slice = self.resolutionSliceThickness * 1e-3 * self.resolutionNumSlices * (1 + self.resolutionSliceGap/100)
         return fov_read, fov_phase, fov_slice
 
     def set_esp(self, esp: float):
@@ -128,14 +128,29 @@ class Sequence:
     params: SequenceParameters = SequenceParameters()
 
     @classmethod
-    def from_cmd_args(cls, prog_args: ArgumentParser.parse_args):
-        Seq = Sequence(specs=prog_args.specs, params=prog_args.params, config=prog_args.config)
-        if prog_args.config.configFile:
-            with open(prog_args.config.configFile, "r") as j_file:
+    def load(cls, path):
+        Seq = Sequence()
+        path = Path(path).absolute()
+        if path.suffix == ".json":
+            with open(path, "r") as j_file:
                 load_dict = json.load(j_file)
             Seq.config = SequenceConfig.from_dict(load_dict["config"])
             Seq.params = SequenceParameters.from_dict(load_dict["params"])
             Seq.specs = ScannerSpecs.from_dict(load_dict["specs"])
+        elif path.suffix == ".seq":
+            if path.exists() and path.is_file():
+                Seq.ppSeq.read(path.__str__())
+            Seq.config.outputPath = path.parent
+        else:
+            raise ValueError(f"{path} file ending not recognized!")
+        return Seq
+
+    @classmethod
+    def from_cmd_args(cls, prog_args: ArgumentParser.parse_args):
+        Seq = Sequence(specs=prog_args.specs, params=prog_args.params, config=prog_args.config)
+        if prog_args.config.configFile:
+            Seq = Seq.load(prog_args.config.configFile)
+
         system = pp.Opts(
             adc_dead_time=prog_args.specs.adc_dead_time,
             gamma=prog_args.specs.gamma,
@@ -155,7 +170,7 @@ class Sequence:
 
         return Seq
 
-    def save(self, emc_info: dict = None):
+    def save(self, emc_info: dict = None, sampling_pattern: list = None):
         if not self.ppSeq.definitions:
             err = "no export definitions were set (FOV, Name)"
             logModule.error(err)
@@ -186,8 +201,19 @@ class Sequence:
                 logModule.info(f"writing file: {save_file}")
                 with open(save_file, "w") as j_file:
                     json.dump(emc_info, j_file, indent=2)
+            # write k_space_sampling pattern
+            if sampling_pattern is not None:
+                self.write_sampling_pattern(sampling_pattern=sampling_pattern)
         else:
             logModule.info("Not Saving: no Path given")
+
+    def write_sampling_pattern(self, sampling_pattern: list):
+        path = Path(self.config.outputPath).absolute()
+        path.mkdir(parents=True, exist_ok=True)
+        sp = pd.DataFrame(sampling_pattern)
+        save_file = path.joinpath(f"jstmc{self.config.version}_sampling_pattern.csv")
+        logModule.info(f"writing file: {save_file}")
+        sp.to_csv(save_file)
 
     def check_output_path(self):
         if not self.config.outputPath:
