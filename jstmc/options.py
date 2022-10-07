@@ -46,9 +46,9 @@ class SequenceParameters(helpers.Serializable):
     """
     Holding all Sequence Parameters
     """
-    resolutionFovRead: float = 256  # [mm]
+    resolutionFovRead: float = 225  # [mm]
     resolutionFovPhase: float = 100.0  # [%]
-    resolutionBase: int = 394
+    resolutionBase: int = 346
     resolutionSliceThickness: float = 0.65  # [mm]
     resolutionNumSlices: int = 55
     resolutionSliceGap: int = 0  # %
@@ -106,7 +106,7 @@ class SequenceParameters(helpers.Serializable):
         return self.resolutionVoxelSizeRead, self.resolutionVoxelSizePhase, self.resolutionSliceThickness
 
     def get_fov(self):
-        fov_read = 1e-3 * self.resolutionFovRead / 64
+        fov_read = 1e-3 * self.resolutionFovRead * 64
         fov_phase = int(fov_read * self.resolutionFovPhase / 100)
         fov_slice = self.resolutionSliceThickness * 1e-3 * self.resolutionNumSlices * (1 + self.resolutionSliceGap/100)
         return fov_read, fov_phase, fov_slice
