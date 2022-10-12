@@ -121,6 +121,12 @@ class SliceGradPulse:
         # if excitation we rephase slice grad and spoil, if refocusing this is the spoiler grad
         self.slice_grad_re_spoil: types.SimpleNamespace = types.SimpleNamespace()
         if self.exci_refoc_flag:
+            # if excitation we pre wind
+            self.slice_grad_prewind: types.SimpleNamespace = pp.make_trapezoid(
+                'z',
+                area=self.params.excitationPreMoment,
+                max_slew=0.8 * self.system.max_slew
+            )
             flip_angle_rad = self.params.excitationRadFA
             phase_rad = self.params.excitationRadRfPhase
             time_bw_prod = self.params.excitationTimeBwProd
@@ -246,24 +252,40 @@ class SliceGradPulse:
         amp = self.slice_grad.amplitude
         flat_time = self.slice_grad.flat_time
 
-        # flat part + ringdown
+        # interpolation to spoiler + flat + interpolation to spoiler
         self.slice_grad = pp.make_extended_trapezoid(
             'z',
             amplitudes=np.array([interpol_gradient_rd_pre, amp, amp, interpol_gradient]),
             times=np.array([0, rise, rise + flat_time, rise + flat_time + self.rf.ringdown_time])
         )
-        self.slice_grad_ru = pp.make_extended_trapezoid(
-            'z',
-            amplitudes=np.array([0, amp, amp, interpol_gradient]),
-            times=np.array([
-                0,
-                rise,
-                flat_time + rise,
-                flat_time + self.rf.ringdown_time + rise
-            ])
-        )
+
         # rephase
         if self.exci_refoc_flag:
+            # merge prewind / slice select
+            t_arr = np.array([
+                0.0,
+                self.slice_grad_prewind.rise_time,
+                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time,
+                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise,
+                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise + flat_time,
+                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise + flat_time + self.rf.ringdown_time
+              ])
+            amps = np.array([
+                0,
+                self.slice_grad_prewind.amplitude,
+                self.slice_grad_prewind.amplitude,
+                amp,
+                amp,
+                interpol_gradient
+            ])
+            self.slice_grad_ru = pp.make_extended_trapezoid(
+                'z',
+                amplitudes=amps,
+                times=t_arr
+            )
+            self.rf.delay = rise + self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time
+
+            # merge gradient re/spoiler
             t_arr = np.array([
                 0.0,
                 rise + self.slice_grad_re_spoil.rise_time - self.rf.ringdown_time,
@@ -284,6 +306,21 @@ class SliceGradPulse:
                 f"excitation rephasing grad: {1e3 * self.slice_grad_re_spoil.amplitude / self.system.gamma:.2f} mT/m"
             )
         else:
+            self.slice_grad_ru = pp.make_extended_trapezoid(
+                'z',
+                amplitudes=np.array([
+                    0,
+                    amp,
+                    amp,
+                    interpol_gradient
+                ]),
+                times=np.array([
+                    0.0,
+                    rise,
+                    rise + flat_time,
+                    rise + flat_time + self.rf.ringdown_time
+                ])
+            )
             # spoilers
             spoil_amps_pre = np.array([
                 0.0,
@@ -436,6 +473,7 @@ class SequenceBlockEvents:
         logModule.info(f"Found minimum TE: {esp * 1e3:.2f} ms")
 
         self.t_duration_echo_train = set_on_grad_raster_time(
+            pp.calc_duration(self.excitation.slice_grad_prewind) +
             pp.calc_duration(self.excitation.slice_grad_ru) +  # before middle of rf
             (pp.calc_duration(self.excitation.rf) - pp.calc_duration(self.excitation.slice_grad_ru)) / 2 +
             self.seq.params.ETL * esp +  # whole TE train

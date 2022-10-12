@@ -62,6 +62,7 @@ class SequenceParameters(helpers.Serializable):
     excitationRfPhase: float = 90.0  # °
     excitationDuration: int = 2500  # [us]
     excitationTimeBwProd: float = 2.0
+    excitationPreMoment: float = 1600.0    # mTus/m
 
     refocusingFA: float = 180.0
     refocusingRfPhase: float = 0.0  # °
@@ -106,8 +107,8 @@ class SequenceParameters(helpers.Serializable):
         return self.resolutionVoxelSizeRead, self.resolutionVoxelSizePhase, self.resolutionSliceThickness
 
     def get_fov(self):
-        fov_read = 1e-3 / self.resolutionFovRead * 64 / self.resolutionBase
-        fov_phase = int(fov_read * self.resolutionFovPhase / 100)
+        fov_read = 1e-3 * self.resolutionFovRead * 64 / self.resolutionBase
+        fov_phase = fov_read * int(self.resolutionFovPhase / 100)
         fov_slice = self.resolutionSliceThickness * 1e-3 * self.resolutionNumSlices * (1 + self.resolutionSliceGap/100)
         return fov_read, fov_phase, fov_slice
 
