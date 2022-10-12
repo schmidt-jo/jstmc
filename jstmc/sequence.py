@@ -410,6 +410,7 @@ class SequenceBlockEvents:
         # slice loop
         numSlices = self.seq.params.resolutionNumSlices
         self.z = np.zeros((2, int(np.ceil(numSlices / 2))))
+        self.trueSliceNum = np.zeros(numSlices)
 
     def _write_emc_info(self) -> dict:
         emc_dict = {
@@ -530,6 +531,8 @@ class SequenceBlockEvents:
         self.z.flat[:numSlices] = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
         # reshuffle slices mid+1, 1, mid+2, 2, ...
         self.z = self.z.transpose().flatten()[:numSlices]
+        # find reshuffled slice numbers
+        self.trueSliceNum = np.array([np.where(self.z == val)[0][0] for val in np.unique(self.z)])
 
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
         # set phase grads
@@ -555,7 +558,7 @@ class SequenceBlockEvents:
         self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
         # write sampling pattern
-        sampling_index = {"pe_num": phase_idx, "slice_num": slice_idx, "echo_num": 0}
+        sampling_index = {"pe_num": phase_idx, "slice_num": self.trueSliceNum[slice_idx], "echo_num": 0}
         self.sampling_pattern.append(sampling_index)
 
     def _add_blocks_refocusing_adc(self, phase_idx: int, slice_idx: int, tse_style: bool = False):
@@ -583,7 +586,7 @@ class SequenceBlockEvents:
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
             # write sampling pattern
-            sampling_index = {"pe_num": idx_phase, "slice_num": slice_idx, "echo_num": contrast_idx}
+            sampling_index = {"pe_num": idx_phase, "slice_num": self.trueSliceNum[slice_idx], "echo_num": contrast_idx}
             self.sampling_pattern.append(sampling_index)
 
         # spoil end
