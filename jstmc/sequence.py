@@ -244,9 +244,9 @@ class SliceGradPulse:
         # we want to interpolate between the slice selection ramp down and the rephasing ramp up
         t_rd_ru = self.slice_grad.fall_time + self.slice_grad_re_spoil.rise_time
         interpol_gradient = (self.slice_grad_re_spoil.amplitude - self.slice_grad.amplitude) / t_rd_ru * \
-                             self.rf.ringdown_time + self.slice_grad.amplitude
+                            self.rf.ringdown_time + self.slice_grad.amplitude
         interpol_gradient_rd_pre = (self.slice_grad_re_spoil.amplitude - self.slice_grad.amplitude) / t_rd_ru * \
-                                    self.rf.delay + self.slice_grad.amplitude
+                                   self.rf.delay + self.slice_grad.amplitude
 
         rise = self.rf.delay
         amp = self.slice_grad.amplitude
@@ -269,7 +269,7 @@ class SliceGradPulse:
                 self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise,
                 self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise + flat_time,
                 self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise + flat_time + self.rf.ringdown_time
-              ])
+            ])
             amps = np.array([
                 0,
                 self.slice_grad_prewind.amplitude,
@@ -532,7 +532,10 @@ class SequenceBlockEvents:
         # reshuffle slices mid+1, 1, mid+2, 2, ...
         self.z = self.z.transpose().flatten()[:numSlices]
         # find reshuffled slice numbers
-        self.trueSliceNum = np.array([np.where(self.z == val)[0][0] for val in np.unique(self.z)])
+        for idx_slice_num in range(numSlices):
+            z_val = self.z[idx_slice_num]
+            z_pos = np.where(np.unique(self.z) == z_val)[0][0]
+            self.trueSliceNum[idx_slice_num] = z_pos
 
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
         # set phase grads
