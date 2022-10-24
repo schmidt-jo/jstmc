@@ -1,4 +1,5 @@
 /slr/
 /jstmc/external_rf/
 /.idea/
-/jstmc/__pycache__/
+**/__pycache__
+*.pyc
