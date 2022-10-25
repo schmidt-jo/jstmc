@@ -77,6 +77,8 @@ class SequenceParameters(helpers.Serializable):
 
     bandwidth: float = 302.0  # [Hz / px]
 
+    phaseDir: str = "PA"
+
     def __post_init__(self):
         # resolution
         self.resolutionNRead = self.resolutionBase  # number of freq encodes
@@ -100,6 +102,16 @@ class SequenceParameters(helpers.Serializable):
         if not self.useAcc:
             self.accelerationFactor = self.ETL
         self.get_voxel_size()
+        if self.phaseDir == "PA":
+            self.read_dir = 'x'
+            self.phase_dir = 'y'
+        elif self.phaseDir == "RL":
+            self.phase_dir = 'x'
+            self.read_dir = 'y'
+        else:
+            err = 'Unknown Phase direction: chose either PA or RL'
+            logModule.error(err)
+            raise AttributeError(err)
 
     def get_voxel_size(self):
         logModule.info(f"Voxel Size [read, phase, slice] in mm: "

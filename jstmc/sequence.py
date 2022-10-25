@@ -40,13 +40,13 @@ class Acquisition:
     def _make_read_gradients(self):
         acquisition_window = set_on_grad_raster_time(self.params.acquisitionTime, system=self.system)
         self.read_grad = pp.make_trapezoid(
-            channel='x',
+            channel=self.params.read_dir,
             flat_area=self.params.deltaK * self.params.resolutionNRead,
             flat_time=acquisition_window,  # given in [s] via options
             system=self.system
         )
         self.read_grad_pre = pp.make_trapezoid(
-            channel='x',
+            channel=self.params.read_dir,
             area=self.read_grad.area / 2,
             system=self.system
         )
@@ -63,7 +63,7 @@ class Acquisition:
                                 self.params.deltaK
         # build longest phase gradient
         gPhase_max = pp.make_trapezoid(
-            channel='y',
+            channel=self.params.phase_dir,
             area=np.max(self.phase_grad_areas),
             system=self.system
         )
@@ -74,13 +74,13 @@ class Acquisition:
         if np.abs(self.phase_grad_areas[idx_phase]) > 0:
             # calculate phase step
             self.phase_grad_pre_adc = pp.make_trapezoid(
-                channel='y',
+                channel=self.params.phase_dir,
                 area=self.phase_grad_areas[idx_phase],
                 duration=self.t_phase,
                 system=self.system
             )
             self.phase_grad_post_adc = pp.make_trapezoid(
-                channel='y',
+                channel=self.params.phase_dir,
                 area=-self.phase_grad_areas[idx_phase],
                 duration=self.t_phase,
                 system=self.system
@@ -91,7 +91,7 @@ class Acquisition:
 
     def reset_read_grad_pre(self, t_read_grad_pre: float):
         self.read_grad_pre = pp.make_trapezoid(
-            channel='x',
+            channel=self.params.read_dir,
             area=self.read_grad_pre.area,
             duration=t_read_grad_pre,
             system=self.system
