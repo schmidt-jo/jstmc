@@ -41,7 +41,7 @@ class Acquisition:
         acquisition_window = set_on_grad_raster_time(self.params.acquisitionTime, system=self.system)
         self.read_grad = pp.make_trapezoid(
             channel=self.params.read_dir,
-            flat_area=self.params.deltaK * self.params.resolutionNRead,
+            flat_area=self.params.deltaK_read * self.params.resolutionNRead,
             flat_time=acquisition_window,  # given in [s] via options
             system=self.system
         )
@@ -60,7 +60,7 @@ class Acquisition:
 
     def _set_phase_areas(self):
         self.phase_grad_areas = (np.arange(self.params.resolutionNPhase) - self.params.resolutionNPhase / 2) * \
-                                self.params.deltaK
+                                self.params.deltaK_phase
         # build longest phase gradient
         gPhase_max = pp.make_trapezoid(
             channel=self.params.phase_dir,
