@@ -30,14 +30,15 @@ def main():
 
     logging.info("Verifying and Writing Files")
     # verifying
-    outpath = Path(seq.config.outputPath).absolute().joinpath("report.txt")
-    with open(outpath, "w") as w_file:
-        report = seq.ppSeq.test_report()
-        ok, err_rep = seq.ppSeq.check_timing()
-        log = "report \n" + report + "\ntiming_check \n" + str(ok) + "\ntiming_error \n"
-        w_file.write(log)
-        for err_rep_item in err_rep:
-            w_file.write(f"{str(err_rep_item)}\n")
+    if seq.config.report:
+        outpath = Path(seq.config.outputPath).absolute().joinpath("report.txt")
+        with open(outpath, "w") as w_file:
+            report = seq.ppSeq.test_report()
+            ok, err_rep = seq.ppSeq.check_timing()
+            log = "report \n" + report + "\ntiming_check \n" + str(ok) + "\ntiming_error \n"
+            w_file.write(log)
+            for err_rep_item in err_rep:
+                w_file.write(f"{str(err_rep_item)}\n")
 
     seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern)
     logging.info(f".seq set definitions: {seq.ppSeq.definitions}")

@@ -16,6 +16,7 @@ class SequenceConfig(helpers.Serializable):
     configFile: str = ""
     outputPath: str = ""
     version: str = "1a"
+    report: bool = True
 
 
 @dataclass
@@ -121,7 +122,7 @@ class SequenceParameters(helpers.Serializable):
 
     def get_fov(self):
         fov_read = 1e-3 * self.resolutionFovRead * 64 / self.resolutionBase
-        fov_phase = fov_read * int(self.resolutionFovPhase / 100)
+        fov_phase = fov_read * self.resolutionFovPhase / 100
         fov_slice = self.resolutionSliceThickness * 1e-3 * self.resolutionNumSlices * (1 + self.resolutionSliceGap/100)
         return fov_read, fov_phase, fov_slice
 
@@ -140,6 +141,15 @@ class Sequence:
     ppSys: pp.Opts = pp.Opts()
     ppSeq: pp.Sequence = pp.Sequence(ppSys)
     params: SequenceParameters = SequenceParameters()
+
+    def _set_name_fov(self) -> str:
+        fov_r = int(self.params.resolutionFovRead)
+        fov_p = int(self.params.resolutionFovPhase / 100 * self.params.resolutionFovRead)
+        fov_s = int(self.params.resolutionSliceThickness * self.params.resolutionNumSlices)
+        return f"fov{fov_r}-{fov_p}-{fov_s}"
+
+    def _set_name_fa(self) -> str:
+        return f"fa{int(self.params.refocusingFA)}"
 
     @classmethod
     def load(cls, path):
@@ -181,7 +191,6 @@ class Sequence:
         Seq.ppSys = system
         Seq.ppSeq = pp.Sequence(system=system)
         Seq.setDefinitions()
-
         return Seq
 
     def save(self, emc_info: dict = None, sampling_pattern: list = None):
@@ -197,8 +206,11 @@ class Sequence:
                 path = path.parent
             if len(self.config.version) > 2:
                 self.config.version = self.config.version[:2]
-            save_file = path.joinpath(f"jstmc{self.config.version}.seq").__str__()
-            logModule.info(f" writing file: {save_file}")
+            file_name = path.joinpath(
+                f"jstmc{self.config.version}_{self._set_name_fa()}_{self._set_name_fov()}_{self.params.phaseDir}"
+            )
+            save_file = file_name.with_suffix(".seq").__str__()
+            logModule.info(f"writing file: {save_file}")
             self.ppSeq.write(save_file)
 
             save_dict = {
@@ -206,12 +218,13 @@ class Sequence:
                 "specs": self.specs.to_dict(),
                 "params": self.params.to_dict()
             }
-            save_file = path.joinpath(f"jstmc{self.config.version}_config.json")
+            save_file = file_name.with_name(f"{file_name.name}_config").with_suffix(".json")
+            save_dict["config"].__setitem__("configFile", save_file.__str__())
             logModule.info(f"writing file: {save_file}")
             with open(save_file, "w") as j_file:
                 json.dump(save_dict, j_file, indent=2)
             if emc_info is not None:
-                save_file = path.joinpath(f"jstmc{self.config.version}_emc_sequence_conf.json")
+                save_file = file_name.with_name(f"{file_name.name}_emc_sequence_conf").with_suffix(".json")
                 logModule.info(f"writing file: {save_file}")
                 with open(save_file, "w") as j_file:
                     json.dump(emc_info, j_file, indent=2)
@@ -225,8 +238,11 @@ class Sequence:
         path = Path(self.config.outputPath).absolute()
         path.mkdir(parents=True, exist_ok=True)
         sp = pd.DataFrame(sampling_pattern)
-        save_file = path.joinpath(f"jstmc{self.config.version}_sampling_pattern.csv")
-        logModule.info(f"writing file: {save_file}")
+        file_name = path.joinpath(
+            f"jstmc{self.config.version}_{self._set_name_fa()}_fov{self._set_name_fov()}_{self.params.phaseDir}_sampling-pattern"
+        )
+        save_file = path.joinpath(file_name)
+        logModule.info(f"writing file: {save_file.with_suffix('.csv')}")
         sp.to_csv(save_file)
 
     def check_output_path(self):
