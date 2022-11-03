@@ -175,7 +175,7 @@ class SliceGradPulse:
             apodization = 0.0
         else:
             use = "refocusing"
-            apodization = 0.5
+            apodization = 0.0
         self.rf, self.slice_grad, slice_grad_re = pp.make_gauss_pulse(
             flip_angle=flip_angle_rad,
             phase_offset=phase_rad,
@@ -415,25 +415,23 @@ class SequenceBlockEvents:
     def _write_emc_info(self) -> dict:
         emc_dict = {
             "gammaHz": self.seq.specs.gamma,
-            "gammaPi": self.seq.specs.gamma * 2 * np.pi,
             "ETL": self.seq.params.ETL,
             "ESP": self.seq.params.ESP,
             "bw": self.seq.params.bandwidth,
-            "durationAcquisition": self.seq.params.acquisitionTime * 1e6,
             "gradMode": "Normal",
             "excitationAngle": self.seq.params.excitationRadFA / np.pi * 180.0,
-            "gradientExcitation": self.excitation.slice_grad.amplitude * 1e3 / self.seq.specs.gamma,
+            "gradientExcitation": self._set_grad_for_emc(self.excitation.slice_grad.amplitude),
             "durationExcitation": self.seq.params.excitationDuration,
-            "gradientExcitationRephase": self.excitation.slice_grad_re_spoil.amplitude * 1e3 / self.seq.specs.gamma,
+            "gradientExcitationRephase": self._set_grad_for_emc(self.excitation.slice_grad_re_spoil.amplitude),
             "durationExcitationRephase": self.excitation.t_re_spoil * 1e6,
             "gradientExcitationVerse1": 0.0,
             "gradientExcitationVerse2": 0.0,
             "durationExcitationVerse1": 0.0,
             "durationExcitationVerse2": 0.0,
             "refocusAngle": self.seq.params.refocusingRadFA / np.pi * 180.0,
-            "gradientRefocus": 0.0,
+            "gradientRefocus": self._set_grad_for_emc(self.refocusing.slice_grad.amplitude),
             "durationRefocus": self.seq.params.refocusingDuration,
-            "gradientCrush": self.refocusing.slice_grad.amplitude * 1e3 / self.seq.specs.gamma,
+            "gradientCrush": self._set_grad_for_emc(self.refocusing.slice_grad.amplitude),
             "durationCrush": self.refocusing.t_re_spoil * 1e6,
             "gradientRefocusVerse1": 0.0,
             "gradientRefocusVerse2": 0.0,
@@ -441,6 +439,9 @@ class SequenceBlockEvents:
             "durationRefocusVerse2": 0.0
         }
         return emc_dict
+
+    def _set_grad_for_emc(self, grad):
+        return -1e3 / self.seq.specs.gamma * grad
 
     def get_sampling_pattern(self) -> list:
         return self.sampling_pattern
@@ -610,10 +611,16 @@ class SequenceBlockEvents:
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
                 freq_offset = self.excitation.slice_grad.amplitude * self.z[idx_slice]
+                phase_offset = self.seq.params.excitationRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
+                    self.excitation.rf)[0]
                 self.excitation.rf.freq_offset = freq_offset
+                self.excitation.rf.phase_offset = phase_offset
 
                 freq_offset = self.refocusing.slice_grad.amplitude * self.z[idx_slice]
+                phase_offset = self.seq.params.refocusingRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
+                    self.refocusing.rf)[0]
                 self.refocusing.rf.freq_offset = freq_offset
+                self.refocusing.rf.phase_offset = phase_offset
 
                 # excitation to first read
                 self._add_blocks_excitation_first_read(phase_idx=idx_phase, slice_idx=idx_slice)
@@ -631,10 +638,16 @@ class SequenceBlockEvents:
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
                 freq_offset = self.excitation.slice_grad.amplitude * self.z[idx_slice]
+                phase_offset = self.seq.params.excitationRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
+                    self.excitation.rf)[0]
                 self.excitation.rf.freq_offset = freq_offset
+                self.excitation.rf.phase_offset = phase_offset
 
                 freq_offset = self.refocusing.slice_grad.amplitude * self.z[idx_slice]
+                phase_offset = self.seq.params.refocusingRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
+                    self.refocusing.rf)[0]
                 self.refocusing.rf.freq_offset = freq_offset
+                self.refocusing.rf.phase_offset = phase_offset
 
                 # for idx_slice in range(num_slices):
                 idx_phase = self.k_indexes[idx_n]
