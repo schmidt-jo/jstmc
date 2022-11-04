@@ -87,7 +87,7 @@ class SequenceParameters(helpers.Serializable):
         self.resolutionVoxelSizeRead = self.resolutionFovRead / self.resolutionBase  # [mm]
         self.resolutionVoxelSizePhase = self.resolutionFovRead / self.resolutionBase  # [mm]
         self.deltaK_read = 1e3 / self.resolutionFovRead  # cast to m
-        self.deltaK_phase = 1e3 / self.resolutionFovRead * self.resolutionFovPhase / 100.0  # cast to m
+        self.deltaK_phase = 1e3 / (self.resolutionFovRead * self.resolutionFovPhase / 100.0)  # cast to m
         self.TE = np.arange(1, self.ETL + 1) * self.ESP  # [ms] echo times
         # sequence
         self.acquisitionTime = 1 / self.bandwidth
