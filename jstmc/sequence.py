@@ -538,6 +538,22 @@ class SequenceBlockEvents:
             z_pos = np.where(np.unique(self.z) == z_val)[0][0]
             self.trueSliceNum[idx_slice_num] = z_pos
 
+    def _apply_slice_offset(self, idx_slice: int, ExRf: bool = True):
+        if ExRf:
+            # excitation
+            grad_amplitude = self.excitation.slice_grad.amplitude
+            rad_phase_pulse = self.seq.params.excitationRadRfPhase
+            rf = self.excitation.rf
+        else:
+            # refocus
+            grad_amplitude = self.refocusing.slice_grad.amplitude
+            rad_phase_pulse = self.seq.params.refocusingRadRfPhase
+            rf = self.refocusing.rf
+        # apply slice offset
+        freq_offset = grad_amplitude * self.z[idx_slice]
+        phase_offset = rad_phase_pulse - 2 * np.pi * freq_offset * pp.calc_rf_center(rf)[0]
+        return freq_offset, phase_offset
+
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
         # set phase grads
         self.acquisition.set_phase_grads(idx_phase=phase_idx)
@@ -610,17 +626,14 @@ class SequenceBlockEvents:
             idx_phase = self.k_start + idx_n
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
-                freq_offset = self.excitation.slice_grad.amplitude * self.z[idx_slice]
-                phase_offset = self.seq.params.excitationRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
-                    self.excitation.rf)[0]
-                self.excitation.rf.freq_offset = freq_offset
-                self.excitation.rf.phase_offset = phase_offset
-
-                freq_offset = self.refocusing.slice_grad.amplitude * self.z[idx_slice]
-                phase_offset = self.seq.params.refocusingRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
-                    self.refocusing.rf)[0]
-                self.refocusing.rf.freq_offset = freq_offset
-                self.refocusing.rf.phase_offset = phase_offset
+                self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
+                    idx_slice=idx_slice,
+                    ExRf=True
+                )
+                self.refocusing.rf.freq_offset, self.refocusing.rf.phase_offset = self._apply_slice_offset(
+                    idx_slice=idx_slice,
+                    ExRf=False
+                )
 
                 # excitation to first read
                 self._add_blocks_excitation_first_read(phase_idx=idx_phase, slice_idx=idx_slice)
@@ -637,17 +650,14 @@ class SequenceBlockEvents:
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
-                freq_offset = self.excitation.slice_grad.amplitude * self.z[idx_slice]
-                phase_offset = self.seq.params.excitationRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
-                    self.excitation.rf)[0]
-                self.excitation.rf.freq_offset = freq_offset
-                self.excitation.rf.phase_offset = phase_offset
-
-                freq_offset = self.refocusing.slice_grad.amplitude * self.z[idx_slice]
-                phase_offset = self.seq.params.refocusingRadRfPhase - 2 * np.pi * freq_offset * pp.calc_rf_center(
-                    self.refocusing.rf)[0]
-                self.refocusing.rf.freq_offset = freq_offset
-                self.refocusing.rf.phase_offset = phase_offset
+                self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
+                    idx_slice=idx_slice,
+                    ExRf=True
+                )
+                self.refocusing.rf.freq_offset, self.refocusing.rf.phase_offset = self._apply_slice_offset(
+                    idx_slice=idx_slice,
+                    ExRf=False
+                )
 
                 # for idx_slice in range(num_slices):
                 idx_phase = self.k_indexes[idx_n]

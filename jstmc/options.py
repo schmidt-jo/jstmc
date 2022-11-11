@@ -241,8 +241,8 @@ class Sequence:
         file_name = path.joinpath(
             f"jstmc{self.config.version}_{self._set_name_fa()}_fov{self._set_name_fov()}_{self.params.phaseDir}_sampling-pattern"
         )
-        save_file = path.joinpath(file_name)
-        logModule.info(f"writing file: {save_file.with_suffix('.csv')}")
+        save_file = path.joinpath(file_name).with_suffix(".csv")
+        logModule.info(f"writing file: {save_file}")
         sp.to_csv(save_file)
 
     def check_output_path(self):
