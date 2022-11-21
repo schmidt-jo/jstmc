@@ -16,7 +16,7 @@ def set_mpl():
     return colors
 
 
-def calc_sar(seq: typing.Union[options.Sequence, Path, str]):
+def calc_sar(seq: typing.Union[options.Sequence, Path, str], visualize: bool = True):
     if isinstance(seq, (str, Path)):
         seq_pass = seq
         path = Path(seq_pass).absolute()
@@ -56,84 +56,85 @@ def calc_sar(seq: typing.Union[options.Sequence, Path, str]):
         logModule.warning(f"SAR 6 min limits exceeded! - head "
                           f"{six_min_avg_head:.2f} / {head_limit_sixmin:.2f} W/kg")
 
-    fig = plt.figure(figsize=(10, 5.5))
-    gs = fig.add_gridspec(2,1)
-    ax = fig.add_subplot(gs[0])
-    x_ax = np.arange(1, 1 + head_tensec.shape[0])
-    ax.set_ylim(0, 5/4 * head_limit_tensec)
+    if visualize:
+        fig = plt.figure(figsize=(10, 5.5))
+        gs = fig.add_gridspec(2,1)
+        ax = fig.add_subplot(gs[0])
+        x_ax = np.arange(1, 1 + head_tensec.shape[0])
+        ax.set_ylim(0, 5/4 * head_limit_tensec)
 
-    # head
-    # max
-    ax.hlines(
-        head_limit_tensec,
-        0, head_tensec.shape[0],
-        color=colors[0],
-        label=f"10 sec limit: {head_limit_tensec:.2f} W/kg",
-        linewidth=2
-    )
-    ax.fill_between(
-        x_ax,
-        np.full(head_tensec.shape, head_limit_tensec),
-        alpha=0.2,
-        color=colors[1]
-    )
+        # head
+        # max
+        ax.hlines(
+            head_limit_tensec,
+            0, head_tensec.shape[0],
+            color=colors[0],
+            label=f"10 sec limit: {head_limit_tensec:.2f} W/kg",
+            linewidth=2
+        )
+        ax.fill_between(
+            x_ax,
+            np.full(head_tensec.shape, head_limit_tensec),
+            alpha=0.2,
+            color=colors[1]
+        )
 
-    ax.scatter(x_ax, head_tensec, color=colors[3], label=f"SAR ten second averages for head")
-    ax.fill_between(x_ax, head_tensec, alpha=0.6, color=colors[4])
+        ax.scatter(x_ax, head_tensec, color=colors[3], label=f"SAR ten second averages for head")
+        ax.fill_between(x_ax, head_tensec, alpha=0.6, color=colors[4])
 
-    # average
-    avg = np.mean(head_tensec) * head_tensec.shape[0] / 360
-    ax.hlines(
-        avg,
-        0, head_tensec.shape[0],
-        color=colors[4],
-        label=f"average: {avg:.2f} W/kg",
-        linewidth=2
-    )
+        # average
+        avg = np.mean(head_tensec) * head_tensec.shape[0] / 360
+        ax.hlines(
+            avg,
+            0, head_tensec.shape[0],
+            color=colors[4],
+            label=f"average: {avg:.2f} W/kg",
+            linewidth=2
+        )
 
-    ax.set_xlabel(f"time [s]")
-    ax.set_ylabel(f"SAR [W/kg]")
+        ax.set_xlabel(f"time [s]")
+        ax.set_ylabel(f"SAR [W/kg]")
 
-    ax.legend()
+        ax.legend()
 
-    # body
-    ax = fig.add_subplot(gs[1])
-    ax.set_ylim(0, 5 / 4 * body_limit_tensec)
-    # max
-    ax.hlines(
-        body_limit_tensec,
-        0, head_tensec.shape[0],
-        color=colors[6],
-        label=f"10 sec limit: {body_limit_tensec:.2f} W/kg",
-        linewidth=2
-    )
-    ax.fill_between(
-        x_ax,
-        np.full(head_tensec.shape, body_limit_tensec),
-        alpha=0.2,
-        color=colors[7]
-    )
-    ax.scatter(x_ax, body_tensec, color=colors[8], label=f"SAR ten second averages for head")
-    ax.fill_between(x_ax, body_tensec, alpha=0.6, color=colors[9])
+        # body
+        ax = fig.add_subplot(gs[1])
+        ax.set_ylim(0, 5 / 4 * body_limit_tensec)
+        # max
+        ax.hlines(
+            body_limit_tensec,
+            0, head_tensec.shape[0],
+            color=colors[6],
+            label=f"10 sec limit: {body_limit_tensec:.2f} W/kg",
+            linewidth=2
+        )
+        ax.fill_between(
+            x_ax,
+            np.full(head_tensec.shape, body_limit_tensec),
+            alpha=0.2,
+            color=colors[7]
+        )
+        ax.scatter(x_ax, body_tensec, color=colors[8], label=f"SAR ten second averages for head")
+        ax.fill_between(x_ax, body_tensec, alpha=0.6, color=colors[9])
 
-    # average
-    avg = np.mean(body_tensec) * head_tensec.shape[0] / 360
-    ax.hlines(
-        avg,
-        0, head_tensec.shape[0],
-        color=colors[10],
-        label=f"average: {avg:.2f} W/kg",
-        linewidth=2
-    )
+        # average
+        avg = np.mean(body_tensec) * head_tensec.shape[0] / 360
+        ax.hlines(
+            avg,
+            0, head_tensec.shape[0],
+            color=colors[10],
+            label=f"average: {avg:.2f} W/kg",
+            linewidth=2
+        )
 
-    ax.set_xlabel(f"time [s]")
-    ax.set_ylabel(f"SAR [W/kg]")
+        ax.set_xlabel(f"time [s]")
+        ax.set_ylabel(f"SAR [W/kg]")
 
-    ax.legend()
+        ax.legend()
 
-    plt.tight_layout()
-    plt.savefig(save_file, bbox_inches="tight")
-    plt.show()
+        plt.tight_layout()
+        plt.savefig(save_file, bbox_inches="tight")
+        plt.show()
 
 
 if __name__ == '__main__':

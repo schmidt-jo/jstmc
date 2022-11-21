@@ -17,6 +17,7 @@ class SequenceConfig(helpers.Serializable):
     outputPath: str = ""
     version: str = "1a"
     report: bool = True
+    visualize: bool = True
 
 
 @dataclass
@@ -54,10 +55,8 @@ class SequenceParameters(helpers.Serializable):
     resolutionNumSlices: int = 55
     resolutionSliceGap: int = 0  # %
 
-    numberOfCentralLines: int = 24
-    accelerationFactor: int = 4
-    partialFourier: float = 6/8
-    useAcc: bool = False
+    numberOfCentralLines: int = 40
+    accelerationFactor: float = 5.0
 
     excitationFA: float = 90.0
     excitationRfPhase: float = 90.0  # °
@@ -89,6 +88,8 @@ class SequenceParameters(helpers.Serializable):
         self.deltaK_read = 1e3 / self.resolutionFovRead  # cast to m
         self.deltaK_phase = 1e3 / (self.resolutionFovRead * self.resolutionFovPhase / 100.0)  # cast to m
         self.TE = np.arange(1, self.ETL + 1) * self.ESP  # [ms] echo times
+        # acc
+        self.numberOfOuterLines = round((self.resolutionNPhase - self.numberOfCentralLines) / self.accelerationFactor)
         # sequence
         self.acquisitionTime = 1 / self.bandwidth
         self.dwell = self.acquisitionTime / self.resolutionNRead
@@ -101,8 +102,6 @@ class SequenceParameters(helpers.Serializable):
         self.excitationRadRfPhase = self.excitationRfPhase / 180.0 * np.pi
         self.refocusingRadFA = self.refocusingFA / 180.0 * np.pi
         self.refocusingRadRfPhase = self.refocusingRfPhase / 180.0 * np.pi
-        if not self.useAcc:
-            self.accelerationFactor = self.ETL
         self.get_voxel_size()
         if self.phaseDir == "PA":
             self.read_dir = 'x'
@@ -155,6 +154,8 @@ class Sequence:
     def load(cls, path):
         Seq = Sequence()
         path = Path(path).absolute()
+        if not path.is_file():
+            raise AttributeError(f"{path} not a file")
         if path.suffix == ".json":
             with open(path, "r") as j_file:
                 load_dict = json.load(j_file)
@@ -218,7 +219,10 @@ class Sequence:
                 "specs": self.specs.to_dict(),
                 "params": self.params.to_dict()
             }
-            save_file = file_name.with_name(f"{file_name.name}_config").with_suffix(".json")
+            if self.config.configFile:
+                save_file = Path(self.config.configFile).absolute()
+            else:
+                save_file = file_name.with_name(f"{file_name.name}_config").with_suffix(".json")
             save_dict["config"].__setitem__("configFile", save_file.__str__())
             logModule.info(f"writing file: {save_file}")
             with open(save_file, "w") as j_file:

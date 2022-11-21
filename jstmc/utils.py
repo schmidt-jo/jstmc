@@ -1,15 +1,21 @@
 import logging
+import typing
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from jstmc import options
 from pathlib import Path
+import tqdm
 
 logModule = logging.getLogger(__name__)
 
 
-def pretty_plot_et(seq: options.Sequence, save: Path = "", plot_blips: bool = False, t_start: int = 0):
+def pretty_plot_et(seq: options.Sequence,
+                   save: typing.Union[str, Path] = "",
+                   plot_blips: bool = False,
+                   t_start: int = 0,
+                   figsize: tuple = (12, 6)):
     linewidth=2
     t_start *= 1000     # cast to us
     logging.info(f"plot")
@@ -114,7 +120,7 @@ def pretty_plot_et(seq: options.Sequence, save: Path = "", plot_blips: bool = Fa
         t_cum = block_end
 
     plt.style.use('ggplot')
-    fig = plt.figure(figsize=(12, 6), dpi=100)
+    fig = plt.figure(figsize=figsize, dpi=100)
     gs = fig.add_gridspec(2, 1)
 
     # ax
@@ -175,3 +181,42 @@ def pretty_plot_et(seq: options.Sequence, save: Path = "", plot_blips: bool = Fa
         logModule.info(f"saving plot-file: {save}")
         plt.savefig(save, bbox_inches="tight", dpi=100)
     plt.show()
+
+
+def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
+    n_read = seq_vars.params.resolutionNRead
+    n_phase = seq_vars.params.resolutionNPhase
+    x_ax = np.tile(np.arange(n_read), seq_vars.params.ETL)
+    y_ax = np.arange(n_phase) - int(n_phase / 2)
+    plot_arr = np.zeros((seq_vars.params.resolutionNPhase, n_read * seq_vars.params.ETL))
+    for s_indices in tqdm.tqdm(sampling_pattern, desc="processing sampling scheme"):
+        pe_num = s_indices['pe_num']
+        echo_num = s_indices['echo_num']
+        plot_arr[pe_num, echo_num*n_read:(echo_num+1)*n_read] = 1
+
+    x_labels = np.arange(1, seq_vars.params.ETL + 1)
+    x_pos = np.array([n_read/2 + k*n_read for k in range(seq_vars.params.ETL)])
+    y_labels = [0]
+    y_pos = [int(n_phase/2)]
+
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot()
+    ax.grid(False)
+    ax.set_xlabel("# echo - freq encode")
+    ax.set_ylabel("# phase encode")
+    ax.set_xticks(x_pos, labels=x_labels)
+    ax.set_yticks(y_pos, labels=y_labels)
+    ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.params.ETL)
+    plt.show()
+
+
+if __name__ == '__main__':
+    # set up path
+    seq_path = Path(
+        "D:\\Daten\\01_Work\\11_owncloud\\ds_mese_cbs_js\\97_pulseq\\sequence\\seq_1a_fa180_fov_210-166-10_RL\\jstmc1a_fa180_fov210-165-14_RL.seq"
+    ).absolute()
+    seq = options.Sequence.load(seq_path)
+    scan_time = np.sum(seq.ppSeq.block_durations)
+    pretty_plot_et(seq, plot_blips=True, t_start=0, figsize=(10, 5))
+
+

@@ -405,7 +405,7 @@ class SequenceBlockEvents:
         # k space
         self.k_start: int = -1
         self.k_end: int = -1
-        self.k_indexes: np.ndarray = np.zeros(0)
+        self.k_indexes: np.ndarray = np.zeros((self.seq.params.ETL, self.seq.params.numberOfOuterLines), dtype=int)
         self.sampling_pattern: list = []
         # slice loop
         numSlices = self.seq.params.resolutionNumSlices
@@ -508,20 +508,35 @@ class SequenceBlockEvents:
 
     def _set_k_space(self):
         # calculate center of k space and indexes for full sampling band
-        k_central_phase = int(self.seq.params.resolutionNPhase / 2)
-        k_half_central_lines = int(self.seq.params.numberOfCentralLines / 2)
+        k_central_phase = round(self.seq.params.resolutionNPhase / 2)
+        k_half_central_lines = round(self.seq.params.numberOfCentralLines / 2)
         # set indexes for start and end of full k space center sampling
         self.k_start = k_central_phase - k_half_central_lines
         self.k_end = k_central_phase + k_half_central_lines
 
         # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
-        # -> acceleration increases with number of contrasts
-        k_end_low = self.k_start - self.seq.params.ETL + 1
-        # use partial fourier 6/8 -> aka 3/4
-        k_end_high = int(self.seq.params.partialFourier * self.seq.params.resolutionNPhase) - self.seq.params.ETL + 1
+        # Trying random sampling, ie. pick random line numbers for remaining indices
         # calculate indexes
-        self.k_indexes = np.concatenate((np.arange(0, k_end_low, self.seq.params.accelerationFactor),
-                                         np.arange(self.k_end, k_end_high, self.seq.params.accelerationFactor)))
+        k_remaining = np.concatenate((
+            np.arange(0, self.k_start),
+            np.arange(self.k_end, self.seq.params.resolutionNPhase)
+        ))
+        # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
+        for idx_echo in range(self.seq.params.ETL):
+            k_indices = np.sort(np.random.choice(
+                k_remaining,
+                size=self.seq.params.numberOfOuterLines,
+                replace=False))
+            self.k_indexes[idx_echo] = k_indices
+
+        # old code
+        # # -> acceleration increases with number of contrasts
+        # k_end_low = self.k_start - self.seq.params.ETL + 1
+        # # use partial fourier 6/8 -> aka 3/4
+        # k_end_high = self.seq.params.resolutionNPhase - self.seq.params.ETL + 1
+        # # calculate indexes
+        # self.k_indexes = np.concatenate((np.arange(0, k_end_low, self.seq.params.accelerationFactor),
+        #                                  np.arange(self.k_end, k_end_high, self.seq.params.accelerationFactor)))
 
     def _set_delta_slices(self):
         # multi-slice
@@ -578,7 +593,7 @@ class SequenceBlockEvents:
         self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
         # write sampling pattern
-        sampling_index = {"pe_num": phase_idx, "slice_num": self.trueSliceNum[slice_idx], "echo_num": 0}
+        sampling_index = {"pe_num": phase_idx, "slice_num": int(self.trueSliceNum[slice_idx]), "echo_num": 0}
         self.sampling_pattern.append(sampling_index)
 
     def _add_blocks_refocusing_adc(self, phase_idx: int, slice_idx: int, tse_style: bool = False):
@@ -596,7 +611,7 @@ class SequenceBlockEvents:
             # spoil phase encode
             # jump to next line if tse style acquisition
             if tse_style:
-                idx_phase = phase_idx + contrast_idx
+                idx_phase = self.k_indexes[contrast_idx, phase_idx]
             else:
                 idx_phase = phase_idx
             # set phase
@@ -606,7 +621,7 @@ class SequenceBlockEvents:
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
             # write sampling pattern
-            sampling_index = {"pe_num": idx_phase, "slice_num": self.trueSliceNum[slice_idx], "echo_num": contrast_idx}
+            sampling_index = {"pe_num": idx_phase, "slice_num": int(self.trueSliceNum[slice_idx]), "echo_num": contrast_idx}
             self.sampling_pattern.append(sampling_index)
 
         # spoil end
@@ -646,7 +661,7 @@ class SequenceBlockEvents:
         # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
         # -> acceleration increases with number of contrasts
 
-        line_bar = tqdm.trange(len(self.k_indexes), desc="phase encodes")
+        line_bar = tqdm.trange(self.seq.params.numberOfOuterLines, desc="phase encodes")
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
@@ -660,12 +675,12 @@ class SequenceBlockEvents:
                 )
 
                 # for idx_slice in range(num_slices):
-                idx_phase = self.k_indexes[idx_n]
+                idx_phase = self.k_indexes[0, idx_n]
                 # add blocks excitation til first read
                 self._add_blocks_excitation_first_read(phase_idx=idx_phase, slice_idx=idx_slice)
 
                 # add blocks for refocussing pulses, tse style
-                self._add_blocks_refocusing_adc(phase_idx=idx_phase, slice_idx=idx_slice, tse_style=True)
+                self._add_blocks_refocusing_adc(phase_idx=idx_n, slice_idx=idx_slice, tse_style=True)
 
     def build(self):
         # calculate number of slices
