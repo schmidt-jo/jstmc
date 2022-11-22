@@ -403,9 +403,10 @@ class SequenceBlockEvents:
         self._calculate_min_esp()
 
         # k space
-        self.k_start: int = -1
-        self.k_end: int = -1
-        self.k_indexes: np.ndarray = np.zeros((self.seq.params.ETL, self.seq.params.numberOfOuterLines), dtype=int)
+        self.k_indexes: np.ndarray = np.zeros(
+            (self.seq.params.ETL, self.seq.params.numberOfCentralLines + self.seq.params.numberOfOuterLines),
+            dtype=int
+        )
         self.sampling_pattern: list = []
         # slice loop
         numSlices = self.seq.params.resolutionNumSlices
@@ -511,32 +512,26 @@ class SequenceBlockEvents:
         k_central_phase = round(self.seq.params.resolutionNPhase / 2)
         k_half_central_lines = round(self.seq.params.numberOfCentralLines / 2)
         # set indexes for start and end of full k space center sampling
-        self.k_start = k_central_phase - k_half_central_lines
-        self.k_end = k_central_phase + k_half_central_lines
+        k_start = k_central_phase - k_half_central_lines
+        k_end = k_central_phase + k_half_central_lines
 
         # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
         # Trying random sampling, ie. pick random line numbers for remaining indices
         # calculate indexes
         k_remaining = np.concatenate((
-            np.arange(0, self.k_start),
-            np.arange(self.k_end, self.seq.params.resolutionNPhase)
+            np.arange(0, k_start),
+            np.arange(k_end, self.seq.params.resolutionNPhase)
         ))
         # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
         for idx_echo in range(self.seq.params.ETL):
+            # same encode for all echoes -> central lines
+            self.k_indexes[idx_echo, :self.seq.params.numberOfCentralLines] = np.arange(k_start, k_end)
+            # random encodes for different echoes
             k_indices = np.sort(np.random.choice(
                 k_remaining,
                 size=self.seq.params.numberOfOuterLines,
                 replace=False))
-            self.k_indexes[idx_echo] = k_indices
-
-        # old code
-        # # -> acceleration increases with number of contrasts
-        # k_end_low = self.k_start - self.seq.params.ETL + 1
-        # # use partial fourier 6/8 -> aka 3/4
-        # k_end_high = self.seq.params.resolutionNPhase - self.seq.params.ETL + 1
-        # # calculate indexes
-        # self.k_indexes = np.concatenate((np.arange(0, k_end_low, self.seq.params.accelerationFactor),
-        #                                  np.arange(self.k_end, k_end_high, self.seq.params.accelerationFactor)))
+            self.k_indexes[idx_echo, self.seq.params.numberOfCentralLines:] = k_indices
 
     def _set_delta_slices(self):
         # multi-slice
@@ -570,8 +565,9 @@ class SequenceBlockEvents:
         return freq_offset, phase_offset
 
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
+        idx_phase = self.k_indexes[0, phase_idx]
         # set phase grads
-        self.acquisition.set_phase_grads(idx_phase=phase_idx)
+        self.acquisition.set_phase_grads(idx_phase=idx_phase)
 
         # excitation
         self.seq.ppSeq.add_block(self.excitation.rf, self.excitation.slice_grad_ru)
@@ -593,10 +589,10 @@ class SequenceBlockEvents:
         self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
         # write sampling pattern
-        sampling_index = {"pe_num": phase_idx, "slice_num": int(self.trueSliceNum[slice_idx]), "echo_num": 0}
+        sampling_index = {"pe_num": idx_phase, "slice_num": int(self.trueSliceNum[slice_idx]), "echo_num": 0}
         self.sampling_pattern.append(sampling_index)
 
-    def _add_blocks_refocusing_adc(self, phase_idx: int, slice_idx: int, tse_style: bool = False):
+    def _add_blocks_refocusing_adc(self, phase_idx: int, slice_idx: int):
         for contrast_idx in np.arange(1, self.seq.params.ETL):
             # delay if necessary
             if self.refocusing.delay.delay > 1e-6:
@@ -609,11 +605,10 @@ class SequenceBlockEvents:
             self.seq.ppSeq.add_block(self.refocusing.rf, self.refocusing.slice_grad)
 
             # spoil phase encode
-            # jump to next line if tse style acquisition
-            if tse_style:
-                idx_phase = self.k_indexes[contrast_idx, phase_idx]
-            else:
-                idx_phase = phase_idx
+            # order of indices (aka same phase encode per contrast or tse style phase encode change per contrast)
+            # is encoded in array
+            idx_phase = self.k_indexes[contrast_idx, phase_idx]
+
             # set phase
             self.acquisition.set_phase_grads(idx_phase=idx_phase)
             self.seq.ppSeq.add_block(self.acquisition.phase_grad_pre_adc, self.refocusing.slice_grad_spoil_post)
@@ -632,13 +627,10 @@ class SequenceBlockEvents:
         )
         self.seq.ppSeq.add_block(self.t_delay_slice)
 
-    def _loop_central_mc(self):
-        logModule.info(f"Central lines")
+    def _loop_lines(self):
         # through phase encodes
-        line_bar = tqdm.trange(self.seq.params.numberOfCentralLines, desc="phase encodes")
+        line_bar = tqdm.trange(self.seq.params.numberOfCentralLines+self.seq.params.numberOfOuterLines, desc="phase encodes")
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
-            # we start at lower end and move through central lines
-            idx_phase = self.k_start + idx_n
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
                 self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
@@ -651,36 +643,10 @@ class SequenceBlockEvents:
                 )
 
                 # excitation to first read
-                self._add_blocks_excitation_first_read(phase_idx=idx_phase, slice_idx=idx_slice)
+                self._add_blocks_excitation_first_read(phase_idx=idx_n, slice_idx=idx_slice)
 
                 # refocusing blocks
-                self._add_blocks_refocusing_adc(phase_idx=idx_phase, slice_idx=idx_slice, tse_style=False)
-
-    def _loop_acc_tse(self):
-        logModule.info(f"TSE acc lines")
-        # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
-        # -> acceleration increases with number of contrasts
-
-        line_bar = tqdm.trange(self.seq.params.numberOfOuterLines, desc="phase encodes")
-        for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
-            for idx_slice in range(self.seq.params.resolutionNumSlices):
-                # apply slice offset
-                self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
-                    idx_slice=idx_slice,
-                    is_excitation=True
-                )
-                self.refocusing.rf.freq_offset, self.refocusing.rf.phase_offset = self._apply_slice_offset(
-                    idx_slice=idx_slice,
-                    is_excitation=False
-                )
-
-                # for idx_slice in range(num_slices):
-                idx_phase = self.k_indexes[0, idx_n]
-                # add blocks excitation til first read
-                self._add_blocks_excitation_first_read(phase_idx=idx_phase, slice_idx=idx_slice)
-
-                # add blocks for refocussing pulses, tse style
-                self._add_blocks_refocusing_adc(phase_idx=idx_n, slice_idx=idx_slice, tse_style=True)
+                self._add_blocks_refocusing_adc(phase_idx=idx_n, slice_idx=idx_slice)
 
     def build(self):
         # calculate number of slices
@@ -690,10 +656,8 @@ class SequenceBlockEvents:
         # set positions for slices
         self._set_delta_slices()
 
-        # loop through central multi contrast building blocks
-        self._loop_central_mc()
-        # loop through tse style outer k-space
-        self._loop_acc_tse()
+        # loop through phase encode line building blocks
+        self._loop_lines()
 
     def get_seq(self):
         # write info into seq obj
