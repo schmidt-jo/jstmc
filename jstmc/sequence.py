@@ -176,7 +176,7 @@ class SliceGradPulse:
         else:
             use = "refocusing"
             apodization = 0.0
-        self.rf, self.slice_grad, slice_grad_re = pp.make_gauss_pulse(
+        self.rf, self.slice_grad, slice_grad_re = pp.make_sinc_pulse(
             flip_angle=flip_angle_rad,
             phase_offset=phase_rad,
             delay=0.0,
@@ -553,8 +553,8 @@ class SequenceBlockEvents:
             z_pos = np.where(np.unique(self.z) == z_val)[0][0]
             self.trueSliceNum[idx_slice_num] = z_pos
 
-    def _apply_slice_offset(self, idx_slice: int, ExRf: bool = True):
-        if ExRf:
+    def _apply_slice_offset(self, idx_slice: int, is_excitation: bool = True):
+        if is_excitation:
             # excitation
             grad_amplitude = self.excitation.slice_grad.amplitude
             rad_phase_pulse = self.seq.params.excitationRadRfPhase
@@ -643,11 +643,11 @@ class SequenceBlockEvents:
                 # apply slice offset
                 self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
                     idx_slice=idx_slice,
-                    ExRf=True
+                    is_excitation=True
                 )
                 self.refocusing.rf.freq_offset, self.refocusing.rf.phase_offset = self._apply_slice_offset(
                     idx_slice=idx_slice,
-                    ExRf=False
+                    is_excitation=False
                 )
 
                 # excitation to first read
@@ -667,11 +667,11 @@ class SequenceBlockEvents:
                 # apply slice offset
                 self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
                     idx_slice=idx_slice,
-                    ExRf=True
+                    is_excitation=True
                 )
                 self.refocusing.rf.freq_offset, self.refocusing.rf.phase_offset = self._apply_slice_offset(
                     idx_slice=idx_slice,
-                    ExRf=False
+                    is_excitation=False
                 )
 
                 # for idx_slice in range(num_slices):

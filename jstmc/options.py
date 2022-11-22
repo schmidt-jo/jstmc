@@ -1,7 +1,7 @@
 import logging
 
 import numpy as np
-from simple_parsing import ArgumentParser, helpers
+from simple_parsing import ArgumentParser, helpers, field
 from dataclasses import dataclass
 import pypulseq as pp
 from pathlib import Path
@@ -13,11 +13,11 @@ logModule = logging.getLogger(__name__)
 
 @dataclass
 class SequenceConfig(helpers.Serializable):
-    configFile: str = ""
-    outputPath: str = ""
+    configFile: str = field(default="", alias=["-c"])
+    outputPath: str = field(default="", alias=["-o"])
     version: str = "1a"
     report: bool = True
-    visualize: bool = True
+    visualize: bool = field(default=True, alias=["-v"])
 
 
 @dataclass
@@ -120,8 +120,8 @@ class SequenceParameters(helpers.Serializable):
         return self.resolutionVoxelSizeRead, self.resolutionVoxelSizePhase, self.resolutionSliceThickness
 
     def get_fov(self):
-        fov_read = 1e-3 * self.resolutionFovRead * 64 / self.resolutionBase
-        fov_phase = fov_read * self.resolutionFovPhase / 100
+        fov_read = 1e-3 * self.resolutionVoxelSizeRead * 64
+        fov_phase = 1e-3 * self.resolutionVoxelSizePhase * 64
         fov_slice = self.resolutionSliceThickness * 1e-3 * self.resolutionNumSlices * (1 + self.resolutionSliceGap/100)
         return fov_read, fov_phase, fov_slice
 
