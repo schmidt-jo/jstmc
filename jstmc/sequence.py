@@ -1,3 +1,8 @@
+"""
+Caution: grad amplitudes of pypulseq methods are in rad!
+need to divide by 2pi for Hz
+"""
+
 import logging
 import types
 from jstmc import options
@@ -13,6 +18,7 @@ def set_on_grad_raster_time(time: float, system: pp.Opts):
 
 
 def load_external_rf(rf_file) -> np.ndarray:
+    # ToDo
     pass
 
 
@@ -109,18 +115,18 @@ class Acquisition:
 
 class SliceGradPulse:
     def __init__(self, params: options.SequenceParameters, system: pp.Opts, t_xy_grad: float,
-                 excitation_refocus_flag: bool):
+                 is_excitation: bool):
         self.params = params
         self.system = system
         self.t_xy_grad = t_xy_grad
-        self.exci_refoc_flag = excitation_refocus_flag
+        self.is_excitation = is_excitation
 
         # slice
         self.slice_grad: types.SimpleNamespace = types.SimpleNamespace()
         self.slice_grad_ru: types.SimpleNamespace = types.SimpleNamespace()
         # if excitation we rephase slice grad and spoil, if refocusing this is the spoiler grad
         self.slice_grad_re_spoil: types.SimpleNamespace = types.SimpleNamespace()
-        if self.exci_refoc_flag:
+        if self.is_excitation:
             # if excitation we pre wind
             self.slice_grad_prewind: types.SimpleNamespace = pp.make_trapezoid(
                 'z',
@@ -160,7 +166,7 @@ class SliceGradPulse:
             duration=duration,
             slice_thickness=slice_thickness
         )
-        if self.exci_refoc_flag:
+        if self.is_excitation:
             self._recalculate_rephase_grad()
         else:
             # build spoiler gradients
@@ -170,7 +176,7 @@ class SliceGradPulse:
     def _make_rf_grad_pulse(self, flip_angle_rad: float, phase_rad: float, time_bw_prod: float,
                             duration: float, slice_thickness: float):
 
-        if self.exci_refoc_flag:
+        if self.is_excitation:
             use = "excitation"
             apodization = 0.0
         else:
@@ -189,7 +195,7 @@ class SliceGradPulse:
             return_gz=True,
             use=use
         )
-        if self.exci_refoc_flag:
+        if self.is_excitation:
             self.slice_grad_re_spoil = slice_grad_re
 
     def _recalculate_rephase_grad(self):
@@ -260,7 +266,7 @@ class SliceGradPulse:
         )
 
         # rephase
-        if self.exci_refoc_flag:
+        if self.is_excitation:
             # merge prewind / slice select
             t_arr = np.array([
                 0.0,
@@ -383,7 +389,7 @@ class SequenceBlockEvents:
             params=self.seq.params,
             system=self.seq.ppSys,
             t_xy_grad=self.acquisition.get_t_read_grad_pre(),
-            excitation_refocus_flag=True
+            is_excitation=True
         )
         if self.excitation.check_post_slice_selection_timing():
             logModule.info(f"Excitation rephase timing longer than readout prephasing, readjusting readout pre")
@@ -394,7 +400,7 @@ class SequenceBlockEvents:
             params=self.seq.params,
             system=self.seq.ppSys,
             t_xy_grad=self.acquisition.get_t_phase(),
-            excitation_refocus_flag=False
+            is_excitation=False
         )
         if self.refocusing.check_post_slice_selection_timing():
             logModule.info(f"Spoiling timing longer than phase encode, readjusting phase enc timing")
@@ -562,10 +568,11 @@ class SequenceBlockEvents:
             grad_amplitude = self.refocusing.slice_grad.amplitude
             rad_phase_pulse = self.seq.params.refocusingRadRfPhase
             rf = self.refocusing.rf
-        # apply slice offset
+        # apply slice offset -> caution grad_amp in rad!
         freq_offset = grad_amplitude * self.z[idx_slice]
-        phase_offset = rad_phase_pulse - 2 * np.pi * freq_offset * pp.calc_rf_center(rf)[0]
-        return freq_offset, phase_offset
+        phase_offset = rad_phase_pulse - freq_offset * pp.calc_rf_center(rf)[0]     # radiant again
+        return np.divide(freq_offset, 2 * np.pi), phase_offset, freq_offset * pp.calc_rf_center(rf)[0]  # casting
+        # freq to Hz
 
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
         idx_phase = self.k_indexes[0, phase_idx]
@@ -632,15 +639,17 @@ class SequenceBlockEvents:
 
     def _loop_lines(self):
         # through phase encodes
-        line_bar = tqdm.trange(self.seq.params.numberOfCentralLines+self.seq.params.numberOfOuterLines, desc="phase encodes")
+        line_bar = tqdm.trange(
+            self.seq.params.numberOfCentralLines+self.seq.params.numberOfOuterLines, desc="phase encodes"
+        )
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
-                self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
+                self.excitation.rf.freq_offset, self.excitation.rf.phase_offset, _ = self._apply_slice_offset(
                     idx_slice=idx_slice,
                     is_excitation=True
                 )
-                self.refocusing.rf.freq_offset, self.refocusing.rf.phase_offset = self._apply_slice_offset(
+                self.refocusing.rf.freq_offset, self.refocusing.rf.phase_offset, _ = self._apply_slice_offset(
                     idx_slice=idx_slice,
                     is_excitation=False
                 )
