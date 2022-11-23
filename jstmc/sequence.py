@@ -366,6 +366,9 @@ class SliceGradPulse:
     def get_timing_post_slice_selection(self):
         return self.t_re_spoil
 
+    def get_gradient_waveform(self):
+        return self.rf.signal, self.rf.t
+
 
 class SequenceBlockEvents:
     def __init__(self, seq: options.Sequence):
