@@ -570,7 +570,7 @@ class SequenceBlockEvents:
             rf = self.refocusing.rf
         # apply slice offset -> caution grad_amp in rad!
         freq_offset = grad_amplitude * self.z[idx_slice]
-        phase_offset = rad_phase_pulse - freq_offset * pp.calc_rf_center(rf)[0]     # radiant again
+        phase_offset = rad_phase_pulse - freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
         return np.divide(freq_offset, 2 * np.pi), phase_offset, freq_offset * pp.calc_rf_center(rf)[0]  # casting
         # freq to Hz
 
@@ -626,7 +626,8 @@ class SequenceBlockEvents:
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
             # write sampling pattern
-            sampling_index = {"pe_num": idx_phase, "slice_num": int(self.trueSliceNum[slice_idx]), "echo_num": contrast_idx}
+            sampling_index = {"pe_num": idx_phase, "slice_num": int(self.trueSliceNum[slice_idx]),
+                              "echo_num": contrast_idx}
             self.sampling_pattern.append(sampling_index)
 
         # spoil end
@@ -640,7 +641,7 @@ class SequenceBlockEvents:
     def _loop_lines(self):
         # through phase encodes
         line_bar = tqdm.trange(
-            self.seq.params.numberOfCentralLines+self.seq.params.numberOfOuterLines, desc="phase encodes"
+            self.seq.params.numberOfCentralLines + self.seq.params.numberOfOuterLines, desc="phase encodes"
         )
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             for idx_slice in range(self.seq.params.resolutionNumSlices):

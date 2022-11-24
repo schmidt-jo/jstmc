@@ -243,7 +243,8 @@ class Sequence:
         path.mkdir(parents=True, exist_ok=True)
         sp = pd.DataFrame(sampling_pattern)
         file_name = path.joinpath(
-            f"jstmc{self.config.version}_{self._set_name_fa()}_fov{self._set_name_fov()}_{self.params.phaseDir}_sampling-pattern"
+            f"jstmc{self.config.version}_{self._set_name_fa()}_{self._set_name_fov()}_{self.params.phaseDir}_sampling"
+            f"-pattern"
         )
         save_file = path.joinpath(file_name).with_suffix(".csv")
         logModule.info(f"writing file: {save_file}")
