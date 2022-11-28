@@ -1,3 +1,2 @@
 
-
-'pip install --upgrade --force pypulseq'
+git clone --recurse-submodules
