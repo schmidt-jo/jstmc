@@ -4,12 +4,15 @@ channels:
   - conda-forge
   - anaconda
 dependencies:
-  - pandas=1.4.3
-  - matplotlib=3.6.1
-  - simple-parsing=0.0.20
-  - numpy=1.22.3
-  - python=3.8
-  - pathtools=0.1.2
+  - python=3.9
+  - numpy=1.23.5
+  - matplotlib=3.6.2
+  - scipy=0.1.23
+  - simple-parsing
+  - sigpy=0.1.23
+  - tqdm=4.64.1
+  - numba=0.56.4
+  - pathtools
   - pip
   - pip:
-      - git+https://github.com/imr-framework/pypulseq@dev
+      - -e git+https://github.com/schmidtijoe/pypulseq@dev
