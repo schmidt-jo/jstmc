@@ -8,5 +8,5 @@
 #### env
 build conda env via environments.yml
 
-install pypulseq from dev branch fork using development mode
-`pip install -e https://github.com/schmidtijoe/pypulseq.git`
+install pypulseq from dev branch fork using the recurse cloned submodule
+`pip install -e <path_to_jstmc/pypulseq/>`
