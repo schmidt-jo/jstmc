@@ -1,4 +1,4 @@
-name: jstmc
+name: pypulseq
 channels:
   - defaults
   - conda-forge
@@ -7,12 +7,10 @@ dependencies:
   - python=3.9
   - numpy=1.23.5
   - matplotlib=3.6.2
-  - scipy=0.1.23
-  - simple-parsing
-  - sigpy=0.1.23
+  - scipy=1.9.3
+  - simple-parsing=0.0.21
   - tqdm=4.64.1
   - numba=0.56.4
-  - pathtools
+  - pathtools=0.1.2
   - pip
-  - pip:
-      - -e git+https://github.com/schmidtijoe/pypulseq@dev
+  - pandas=1.5.2

@@ -572,7 +572,7 @@ class SequenceBlockEvents:
         freq_offset = grad_amplitude * self.z[idx_slice]
         phase_offset = rad_phase_pulse - freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
         return np.divide(freq_offset, 2 * np.pi), phase_offset, freq_offset * pp.calc_rf_center(rf)[0]  # casting
-        # freq to Hz
+        # freq to Hz, phase is in radiant here
 
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
         idx_phase = self.k_indexes[0, phase_idx]
