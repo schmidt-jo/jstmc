@@ -188,7 +188,7 @@ class SliceGradPulse:
             delay=0.0,
             apodization=apodization,
             time_bw_product=time_bw_prod,
-            duration=duration,  # given in [us] via options
+            duration=duration,
             max_slew=0.8 * self.system.max_slew,
             system=self.system,
             slice_thickness=slice_thickness,
