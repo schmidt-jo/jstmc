@@ -525,22 +525,23 @@ class SequenceBlockEvents:
         k_end = k_central_phase + k_half_central_lines
 
         # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
-        # Trying random sampling, ie. pick random line numbers for remaining indices
+        # Trying random sampling, ie. pick random line numbers for remaining indices,
+        # we dont want to pick the same positive as negative phase encodes to account for conjugate symmetry in k-space.
+        # Hence, we pick from the positive indexes twice (thinking of the center as 0) without allowing for duplexes
+        # and negate half the picks
         # calculate indexes
-        k_remaining = np.concatenate((
-            np.arange(0, k_start),
-            np.arange(k_end, self.seq.params.resolutionNPhase)
-        ))
+        k_remaining = np.arange(0, k_start)
         # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
         for idx_echo in range(self.seq.params.ETL):
             # same encode for all echoes -> central lines
             self.k_indexes[idx_echo, :self.seq.params.numberOfCentralLines] = np.arange(k_start, k_end)
             # random encodes for different echoes
-            k_indices = np.sort(np.random.choice(
+            k_indices = np.random.choice(
                 k_remaining,
                 size=self.seq.params.numberOfOuterLines,
-                replace=False))
-            self.k_indexes[idx_echo, self.seq.params.numberOfCentralLines:] = k_indices
+                replace=False)
+            k_indices[::2] = self.seq.params.resolutionNPhase - k_indices[::2]
+            self.k_indexes[idx_echo, self.seq.params.numberOfCentralLines:] = np.sort(k_indices)
 
     def _set_delta_slices(self):
         # multi-slice
