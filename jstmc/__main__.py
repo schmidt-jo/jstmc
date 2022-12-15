@@ -46,15 +46,14 @@ def main():
     if seq.config.visualize:
         logging.info("Plotting")
         utils.plot_sampling_pattern(sampling_pattern, seq_vars=seq)
-        # path = Path("jstmc/images").absolute()
+        path = Path("test/images").absolute()
         # seq.ppSeq.plot()
 
-        # utils.pretty_plot_et(seq, t_start=seq.params.TR)  # , save=path.joinpath("echo_train_central_semc.png"))
-        # utils.pretty_plot_et(seq, t_start=scan_time * 1e3 - 4*seq.params.TR, plot_blips=True)
-        #  save=path.joinpath("echo_train_acc_tse.png"))
+        utils.pretty_plot_et(seq, t_start=seq.params.TR, save=path.joinpath("echo_train_central_semc.png"))
+        utils.pretty_plot_et(seq, t_start=scan_time * 1e3 - 4*seq.params.TR, save=path.joinpath("echo_train_acc_tse.png"))
 
-        seq.ppSeq.plot(time_range=(0, 2e-3 * seq.params.TR), time_disp='s')
-        seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
+        # seq.ppSeq.plot(time_range=(0, 2e-3 * seq.params.TR), time_disp='s')
+        # seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
 
 
 if __name__ == '__main__':
