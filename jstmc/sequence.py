@@ -65,7 +65,7 @@ class Acquisition:
             system=self.system)
 
     def _set_phase_areas(self):
-        self.phase_grad_areas = (np.arange(self.params.resolutionNPhase) - self.params.resolutionNPhase / 2) * \
+        self.phase_grad_areas = (- np.arange(self.params.resolutionNPhase) + self.params.resolutionNPhase / 2) * \
                                 self.params.deltaK_phase
         # build longest phase gradient
         gPhase_max = pp.make_trapezoid(
@@ -130,7 +130,7 @@ class SliceGradPulse:
             # if excitation we pre wind
             self.slice_grad_prewind: types.SimpleNamespace = pp.make_trapezoid(
                 'z',
-                area=self.params.excitationPreMoment,
+                area=-self.params.excitationPreMoment,
                 max_slew=0.8 * self.system.max_slew
             )
             flip_angle_rad = self.params.excitationRadFA
@@ -178,9 +178,11 @@ class SliceGradPulse:
 
         if self.is_excitation:
             use = "excitation"
+            # can change apodization here
             apodization = 0.0
         else:
             use = "refocusing"
+            # can change apodization here
             apodization = 0.0
         self.rf, self.slice_grad, slice_grad_re = pp.make_sinc_pulse(
             flip_angle=flip_angle_rad,
@@ -200,7 +202,7 @@ class SliceGradPulse:
 
     def _recalculate_rephase_grad(self):
         # calculate spoil grad area -> cast thickness from mm to m
-        spoil_area = self.params.spoilerScaling * 1e3 / self.params.resolutionSliceThickness
+        spoil_area = - self.params.spoilerScaling * 1e3 / self.params.resolutionSliceThickness
         # reset rephaser
         self.slice_grad_re_spoil = pp.make_trapezoid(
             channel='z',
@@ -220,7 +222,7 @@ class SliceGradPulse:
     def _make_spoiler_gradient(self):
         self.slice_grad_re_spoil = pp.make_trapezoid(
             channel='z',
-            area=self.params.spoilerScaling * 1e3 / self.params.resolutionSliceThickness,
+            area=- self.params.spoilerScaling * 1e3 / self.params.resolutionSliceThickness,
             # slice thickness given in mm
             system=self.system
         )
@@ -540,7 +542,7 @@ class SequenceBlockEvents:
                 k_remaining,
                 size=self.seq.params.numberOfOuterLines,
                 replace=False)
-            k_indices[::2] = self.seq.params.resolutionNPhase - k_indices[::2]
+            k_indices[::2] = self.seq.params.resolutionNPhase - 1 - k_indices[::2]
             self.k_indexes[idx_echo, self.seq.params.numberOfCentralLines:] = np.sort(k_indices)
 
     def _set_delta_slices(self):

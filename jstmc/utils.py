@@ -136,10 +136,10 @@ def pretty_plot_et(seq: options.Sequence,
     ax_phase.plot(x_arr / 1000, arr_rf[1] / np.pi, color=colors[-1])
 
     # gz
-    gz_max = 1.1 * np.max(arr_g[2])
+    gz_max = 1.1 * np.max(np.abs(arr_g[2]))
     ax_g = configure_axes_twin(ax_g, y_label=f"$g_z [mT/m]$", color=6, max_val=gz_max, grid=True)
-    ax_g.fill_between(x_arr / 1000, -arr_g[2], alpha=0.6, color=colors[6])
-    ax_g.plot(x_arr / 1000, -arr_g[2], c=colors[6])
+    ax_g.fill_between(x_arr / 1000, arr_g[2], alpha=0.6, color=colors[6])
+    ax_g.plot(x_arr / 1000, arr_g[2], c=colors[6])
 
     # rf signal
     ax_rf = ax_g.twinx()
@@ -154,13 +154,15 @@ def pretty_plot_et(seq: options.Sequence,
 
     # gx
     ax_g = ax_adc.twinx()
-    ax_g = configure_axes_twin(ax_g, y_label=f"$g_x$ [mT/m]", color=8, max_val=1.1*np.max(arr_g[0]))
+    gx_max = 1.1*np.max(np.abs(arr_g[0]))
+    ax_g = configure_axes_twin(ax_g, y_label=f"$g_x$ [mT/m]", color=8, max_val=gx_max)
     ax_g.plot(x_arr / 1000, arr_g[0], c=colors[8], linewidth=linewidth)
     ax_g.fill_between(x_arr / 1000, arr_g[0], color=colors[9], alpha=0.4, hatch='/')
 
     # gy
     ax_gy = ax_adc.twinx()
-    ax_gy = configure_axes_twin(ax_gy, y_ax_offset=True, y_label=f"$g_y$ [mT/m]", color=5, max_val=1.1*np.max(arr_g[1]))
+    gy_max = 1.1*np.max(np.abs(arr_g[1]))
+    ax_gy = configure_axes_twin(ax_gy, y_ax_offset=True, y_label=f"$g_y$ [mT/m]", color=5, max_val=gy_max)
     ax_gy.plot(x_arr / 1000, arr_g[1], c=colors[5], label=f"$g_y$", zorder=1, linewidth=linewidth)
 
     if plot_blips:
