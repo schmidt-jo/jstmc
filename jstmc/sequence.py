@@ -481,7 +481,7 @@ class SequenceBlockEvents:
         return emc_dict
 
     def _set_grad_for_emc(self, grad):
-        return -1e3 / self.seq.specs.gamma * grad
+        return 1e3 / self.seq.specs.gamma * grad
 
     def get_sampling_pattern(self) -> list:
         return self.sampling_pattern
