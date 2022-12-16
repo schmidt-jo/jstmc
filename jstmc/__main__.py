@@ -19,6 +19,7 @@ def main():
     sbe.build()
     emc_info = sbe.get_emc_info()
     sampling_pattern = sbe.get_sampling_pattern()
+    pulse = sbe.get_pulse_amplitudes()
     seq = sbe.get_seq()
     seq.write_sampling_pattern(sampling_pattern=sampling_pattern)
 
@@ -40,7 +41,7 @@ def main():
             for err_rep_item in err_rep:
                 w_file.write(f"{str(err_rep_item)}\n")
 
-    seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern)
+    seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern, pulse_signal=pulse)
     logging.info(f".seq set definitions: {seq.ppSeq.definitions}")
 
     if seq.config.visualize:
