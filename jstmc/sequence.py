@@ -59,10 +59,18 @@ class Acquisition:
         )
         self.t_read_pre = pp.calc_duration(self.read_grad_pre)
         # set adc
+        # check timing
+        acquisition_time = self.params.dwell * int(self.params.resolutionNRead * self.params.oversampling)
+        if acquisition_window < acquisition_time:
+            err = "adc timing not compatible with read gradient"
+            logModule.error(err)
+            raise ValueError(err)
+
+        delay = (acquisition_window - acquisition_time) / 2 + self.read_grad.rise_time
         self.adc = pp.make_adc(
-            num_samples=self.params.resolutionNRead,
-            delay=self.read_grad.rise_time,
-            duration=self.read_grad.flat_time,
+            num_samples=int(self.params.resolutionNRead * self.params.oversampling),
+            delay=delay,
+            dwell=self.params.dwell,
             system=self.system)
 
     def _set_phase_areas(self):

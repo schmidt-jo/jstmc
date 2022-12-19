@@ -77,6 +77,7 @@ class SequenceParameters(helpers.Serializable):
     TR: float = 4500.0  # [ms]
 
     bandwidth: float = 302.0  # [Hz / px]
+    oversampling: float = 2.0   # oversampling factor
 
     phaseDir: str = "PA"
 
@@ -93,7 +94,7 @@ class SequenceParameters(helpers.Serializable):
         self.numberOfOuterLines = round((self.resolutionNPhase - self.numberOfCentralLines) / self.accelerationFactor)
         # sequence
         self.acquisitionTime = 1 / self.bandwidth
-        self.dwell = self.acquisitionTime / self.resolutionNRead
+        self.dwell = self.acquisitionTime / self.resolutionNRead / self.oversampling   # oversampling
         logModule.info(f"Bandwidth: {self.bandwidth:.1f} Hz/px;"
                        f"Readout time: {self.acquisitionTime * 1e3:.1f} ms;"
                        f"DwellTime: {self.dwell * 1e6:.1f} us;"
