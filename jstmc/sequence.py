@@ -132,24 +132,20 @@ class SliceGradPulse:
 
         # slice
         self.slice_grad: types.SimpleNamespace = types.SimpleNamespace()
-        self.slice_grad_ru: types.SimpleNamespace = types.SimpleNamespace()
+        self.slice_grad_from_zero: types.SimpleNamespace = types.SimpleNamespace()
+        # pre gradient, this is pre moment upon excitation and symmetric spoil upon refocusing
+        self.slice_grad_pre: types.SimpleNamespace = types.SimpleNamespace()
         # if excitation we rephase slice grad and spoil, if refocusing this is the spoiler grad
-        self.slice_grad_re_spoil: types.SimpleNamespace = types.SimpleNamespace()
+        self.slice_grad_post: types.SimpleNamespace = types.SimpleNamespace()
+        # last spoiling grad needs to be separate
+        self.slice_grad_post_from_zero: types.SimpleNamespace = types.SimpleNamespace()
+
         if self.is_excitation:
-            # if excitation we pre wind
-            self.slice_grad_prewind: types.SimpleNamespace = pp.make_trapezoid(
-                'z',
-                area=-self.params.excitationPreMoment,
-                max_slew=0.8 * self.system.max_slew
-            )
             flip_angle_rad = self.params.excitationRadFA
             phase_rad = self.params.excitationRadRfPhase
             time_bw_prod = self.params.excitationTimeBwProd
             duration = self.params.excitationDuration * 1e-6
         else:
-            # if refocusing we spoil
-            self.slice_grad_spoil_post: types.SimpleNamespace = types.SimpleNamespace()
-            self.slice_grad_spoil_pre: types.SimpleNamespace = types.SimpleNamespace()
             flip_angle_rad = self.params.refocusingRadFA        # these are lists now!
             phase_rad = self.params.refocusingRadRfPhase        # these are lists now!
             time_bw_prod = self.params.refocusingTimeBwProd
@@ -176,10 +172,20 @@ class SliceGradPulse:
             slice_thickness=slice_thickness
         )
         if self.is_excitation:
+            # if excitation we pre wind
+            self.slice_grad_pre: types.SimpleNamespace = pp.make_trapezoid(
+                'z',
+                area=-self.params.excitationPreMoment,
+                max_slew=0.8 * self.system.max_slew
+            )
+            # if excitation we adjust rephasing + spoiling
             self._recalculate_rephase_grad()
         else:
-            # build spoiler gradients
-            self._make_spoiler_gradient()
+            # if refocusing we set spoiler grads
+            self.slice_grad_pre = self._make_spoiler_gradient()
+            self.slice_grad_post = self._make_spoiler_gradient()
+            self.slice_grad_post_from_zero = self._make_spoiler_gradient()
+
         self._merge_grads()  # merge slice gradients to continuous waveform
 
     def _make_rf_grad_pulse(self, flip_angle_rad: typing.Union[float, np.ndarray, list],
@@ -201,7 +207,7 @@ class SliceGradPulse:
             use = "refocusing"
             # can change apodization here
             apodization = 0.0
-        self.rf, self.slice_grad, slice_grad_re = pp.make_sinc_pulse(
+        rf, self.slice_grad, slice_grad_re = pp.make_sinc_pulse(
             flip_angle=flip_angle_rad[0],
             phase_offset=phase_rad[0],
             delay=0.0,
@@ -215,14 +221,15 @@ class SliceGradPulse:
             use=use
         )
         if self.is_excitation:
-            self.slice_grad_re_spoil = slice_grad_re
+            self.rf = rf
+            self.slice_grad_post = slice_grad_re
         else:
             self.rf = []
             for k in range(flip_angle_rad.__len__()):
                 self.rf.append(pp.make_sinc_pulse(
                     flip_angle=flip_angle_rad[k],
                     phase_offset=phase_rad[k],
-                    delay=0.0,
+                    delay=rf.delay,
                     apodization=apodization,
                     time_bw_product=time_bw_prod,
                     duration=duration,
@@ -237,38 +244,39 @@ class SliceGradPulse:
         # calculate spoil grad area -> cast thickness from mm to m
         spoil_area = - self.params.spoilerScaling * 1e3 / self.params.resolutionSliceThickness
         # reset rephaser
-        self.slice_grad_re_spoil = pp.make_trapezoid(
+        self.slice_grad_post = pp.make_trapezoid(
             channel='z',
-            area=spoil_area + self.slice_grad_re_spoil.area,
+            area=spoil_area + self.slice_grad_post.area,
             system=self.system
         )
-        self.t_re_spoil = set_on_grad_raster_time(pp.calc_duration(self.slice_grad_re_spoil), system=self.system)
+        self.t_re_spoil = set_on_grad_raster_time(pp.calc_duration(self.slice_grad_post), system=self.system)
         if self._check_timing_changed():
             # if we need to adjust timing do so
-            self.slice_grad_re_spoil = pp.make_trapezoid(
+            self.slice_grad_post = pp.make_trapezoid(
                 channel='z',
-                area=self.slice_grad_re_spoil.area,
+                area=self.slice_grad_post.area,
                 system=self.system,
                 duration=self.t_re_spoil
             )
 
     def _make_spoiler_gradient(self):
-        self.slice_grad_re_spoil = pp.make_trapezoid(
+        slice_grad_spoil = pp.make_trapezoid(
             channel='z',
             area=- self.params.spoilerScaling * 1e3 / self.params.resolutionSliceThickness,
             # slice thickness given in mm
             system=self.system
         )
-        self.t_re_spoil = set_on_grad_raster_time(pp.calc_duration(self.slice_grad_re_spoil), system=self.system)
+        self.t_re_spoil = set_on_grad_raster_time(pp.calc_duration(slice_grad_spoil), system=self.system)
         if self._check_timing_changed():
             # if we need to adjust timing do so
-            self.slice_grad_re_spoil = pp.make_trapezoid(
+            slice_grad_spoil = pp.make_trapezoid(
                 channel='z',
-                area=self.slice_grad_re_spoil.area,
+                area=slice_grad_spoil.area,
                 # slice thickness given in mm
                 system=self.system,
                 duration=self.t_re_spoil
             )
+        return slice_grad_spoil
 
     def _check_timing_changed(self) -> bool:
         # set longer time after excitation and optimize gradients to timing
@@ -281,131 +289,105 @@ class SliceGradPulse:
             return True
 
     def _merge_grads(self):
-        # --- merge excitation and rephaser at edges ---
-        if self.is_excitation:
-            rf = self.rf
-        else:
+        # quick sanity checks
+        rf = self.rf
+        if isinstance(self.rf, list):
             rf = self.rf[0]
-        # we want to interpolate between the slice selection ramp down and the rephasing ramp up
-        t_rd_ru = self.slice_grad.fall_time + self.slice_grad_re_spoil.rise_time
-        interpol_gradient = (self.slice_grad_re_spoil.amplitude - self.slice_grad.amplitude) / t_rd_ru * \
-                            rf.ringdown_time + self.slice_grad.amplitude
-        interpol_gradient_rd_pre = (self.slice_grad_re_spoil.amplitude - self.slice_grad.amplitude) / t_rd_ru * \
-                                   rf.delay + self.slice_grad.amplitude
+        if np.abs(rf.delay - self.slice_grad.rise_time) > self.system.grad_raster_time:
+            err = f"rf delay ({1e3 * rf.delay:.2f} ms) != slice selective gradient rise time (" \
+                  f"{1e3 * self.slice_grad.rise_time:.2f} ms). But events are supposed to start in same block"
+            logModule.error(err)
+            raise ValueError(err)
+        if rf.ringdown_time > self.slice_grad.fall_time:
+            err = f"rf ringdown extends beyond slice selective gradient!"
+            logModule.error(err)
+            raise ValueError(err)
 
-        rise = rf.delay
+        rise = self.slice_grad.rise_time
+        # sanity check rise and fall times to equal
+        if np.abs(self.slice_grad.fall_time - rise) > 0:
+            err = f"rise time and fall time not equal"
+            logModule.error(err)
+            raise ValueError(err)
+
         amp = self.slice_grad.amplitude
         flat_time = self.slice_grad.flat_time
 
-        # interpolation to spoiler + flat + interpolation to spoiler
+        # --- merge at edges ---
+        # we want to interpolate between the pre gradient ramp down and slice selection ramp up
+        t_rd_ru = self.slice_grad_pre.fall_time + rise
+        interpol_gradient_pre_to_slice_sel = np.divide(
+            self.slice_grad_pre.amplitude - self.slice_grad.amplitude,
+            t_rd_ru
+        ) * self.slice_grad.rise_time + self.slice_grad.amplitude
+        # we want to interpolate between the slice selection ramp down and the rephasing ramp up,
+        t_rd_ru = rise + self.slice_grad_post.rise_time
+        interpol_gradient_slice_sel_to_spoil = np.divide(
+            self.slice_grad_post.amplitude - self.slice_grad.amplitude,
+            t_rd_ru
+        ) * self.slice_grad.fall_time + self.slice_grad.amplitude
+
+        # slice selection core part: interpolation from pre + flat + interpolation to post
         self.slice_grad = pp.make_extended_trapezoid(
             'z',
-            amplitudes=np.array([interpol_gradient_rd_pre, amp, amp, interpol_gradient]),
-            times=np.array([0, rise, rise + flat_time, rise + flat_time + rf.ringdown_time])
+            amplitudes=np.array([interpol_gradient_pre_to_slice_sel, amp, amp, interpol_gradient_slice_sel_to_spoil]),
+            times=np.array([0, rise, rise + flat_time, 2 * rise + flat_time])
         )
 
-        # rephase
-        if self.is_excitation:
-            # merge prewind / slice select
-            t_arr = np.array([
-                0.0,
-                self.slice_grad_prewind.rise_time,
-                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time,
-                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise,
-                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise + flat_time,
-                self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time + rise + flat_time +
-                rf.ringdown_time
-            ])
-            amps = np.array([
-                0,
-                self.slice_grad_prewind.amplitude,
-                self.slice_grad_prewind.amplitude,
-                amp,
-                amp,
-                interpol_gradient
-            ])
-            self.slice_grad_ru = pp.make_extended_trapezoid(
-                'z',
-                amplitudes=amps,
-                times=t_arr
-            )
-            rf.delay = rise + self.slice_grad_prewind.rise_time + self.slice_grad_prewind.flat_time
+        # pre to slice selection
+        t_arr = np.array([
+            0.0,
+            self.slice_grad_pre.rise_time,
+            self.slice_grad_pre.rise_time + self.slice_grad_pre.flat_time,
+            self.slice_grad_pre.rise_time + self.slice_grad_pre.flat_time + self.slice_grad_pre.fall_time
+        ])
+        amps = np.array([
+            0.0,
+            self.slice_grad_pre.amplitude,
+            self.slice_grad_pre.amplitude,
+            interpol_gradient_pre_to_slice_sel
+        ])
+        self.slice_grad_pre = pp.make_extended_trapezoid(
+            'z',
+            amplitudes=amps,
+            times=t_arr
+        )
+        # slice selection to post
+        # interpolate gradient re/spoiler
+        t_arr = np.array([
+            0.0,
+            self.slice_grad_post.rise_time,
+            self.slice_grad_post.flat_time + self.slice_grad_post.rise_time,
+            self.slice_grad_post.flat_time + 2 * self.slice_grad_post.rise_time
+        ])
+        amps = np.array([
+            interpol_gradient_slice_sel_to_spoil,
+            self.slice_grad_post.amplitude,
+            self.slice_grad_post.amplitude,
+            0.0
+        ])
+        re_spoil_amp = self.slice_grad_post.amplitude
+        self.slice_grad_post = pp.make_extended_trapezoid('z', amplitudes=amps, times=t_arr)
+        self.slice_grad_post.amplitude = re_spoil_amp
 
-            # merge gradient re/spoiler
-            t_arr = np.array([
-                0.0,
-                rise + self.slice_grad_re_spoil.rise_time - rf.ringdown_time,
-                self.slice_grad_re_spoil.flat_time + rise + self.slice_grad_re_spoil.rise_time - rf.ringdown_time,
-                self.slice_grad_re_spoil.flat_time + rise + 2 * self.slice_grad_re_spoil.rise_time - rf.ringdown_time
-            ])
-            amps = np.array([
-                self.slice_grad_ru.last,
-                self.slice_grad_re_spoil.amplitude,
-                self.slice_grad_re_spoil.amplitude,
-                0.0
-            ])
-            re_spoil_amp = self.slice_grad_re_spoil.amplitude
-            self.slice_grad_re_spoil = pp.make_extended_trapezoid('z', amplitudes=amps, times=t_arr)
-            self.slice_grad_re_spoil.amplitude = re_spoil_amp
-            logModule.debug(f"excitation grad: {1e3 * self.slice_grad.last / self.system.gamma:.2f} mT/m")
-            logModule.debug(
-                f"excitation rephasing grad: {1e3 * self.slice_grad_re_spoil.amplitude / self.system.gamma:.2f} mT/m"
-            )
-        else:
-            self.slice_grad_ru = pp.make_extended_trapezoid(
-                'z',
-                amplitudes=np.array([
-                    0,
-                    amp,
-                    amp,
-                    interpol_gradient
-                ]),
-                times=np.array([
-                    0.0,
-                    rise,
-                    rise + flat_time,
-                    rise + flat_time + rf.ringdown_time
-                ])
-            )
-            # spoilers
-            spoil_amps_pre = np.array([
-                0.0,
-                self.slice_grad_re_spoil.amplitude,
-                self.slice_grad_re_spoil.amplitude,
-                interpol_gradient_rd_pre
-            ])
-            spoil_timings_pre = np.array([
-                0.0,
-                self.slice_grad_re_spoil.rise_time,
-                self.slice_grad_re_spoil.rise_time + self.slice_grad_re_spoil.flat_time,
-                self.slice_grad_re_spoil.rise_time + self.slice_grad_re_spoil.flat_time + self.slice_grad_re_spoil.fall_time
-            ])
-
-            spoil_amps_post = spoil_amps_pre[::-1].copy()
-            spoil_amps_post[0] = self.slice_grad_ru.last
-            spoil_timings_post = np.array([
-                0.0,
-                self.slice_grad_re_spoil.rise_time - rf.ringdown_time,
-                self.slice_grad_re_spoil.rise_time + self.slice_grad_re_spoil.flat_time - rf.ringdown_time,
-                self.slice_grad_re_spoil.rise_time + self.slice_grad_re_spoil.flat_time +
-                self.slice_grad_re_spoil.fall_time - rf.ringdown_time
-            ])
-
-            self.slice_grad_spoil_pre = pp.make_extended_trapezoid(
-                'z',
-                amplitudes=spoil_amps_pre,
-                times=spoil_timings_pre
-            )
-            self.slice_grad_spoil_post = pp.make_extended_trapezoid(
-                'z',
-                amplitudes=spoil_amps_post,
-                times=spoil_timings_post
-            )
-            logModule.debug(f"refocusing grad: {1e3 * self.slice_grad.last / self.system.gamma:.2f} mT/m")
-            logModule.debug(
-                f"refocusing spoiling grad: {1e3 * self.slice_grad_re_spoil.amplitude / self.system.gamma:.2f} mT/m"
-            )
+        logModule.debug(f"slice sel grad: {1e3 * self.slice_grad.last / self.system.gamma:.2f} mT/m")
+        logModule.debug(
+            f"rephasing grad: {1e3 * self.slice_grad_post.amplitude / self.system.gamma:.2f} mT/m"
+        )
+        logModule.debug(
+            f"spoiling grad: {1e3 * self.slice_grad_post.amplitude / self.system.gamma:.2f} mT/m"
+        )
         self.slice_grad.amplitude = amp
+
+        # additionally we keep one slice selection from ramp up
+        self.slice_grad_from_zero = pp.make_extended_trapezoid(
+            'z',
+            amplitudes=np.array([
+                0.0, self.slice_grad.amplitude, self.slice_grad.amplitude, interpol_gradient_slice_sel_to_spoil]),
+            times=np.array([
+                0.0, rise, rise + flat_time, 2*rise + flat_time
+            ])
+        )
 
     def check_post_slice_selection_timing(self):
         return not self._check_timing_changed()
@@ -469,7 +451,7 @@ class SequenceBlockEvents:
             "excitationAngle": self.seq.params.excitationRadFA / np.pi * 180.0,
             "gradientExcitation": self._set_grad_for_emc(self.excitation.slice_grad.amplitude),
             "durationExcitation": self.seq.params.excitationDuration,
-            "gradientExcitationRephase": self._set_grad_for_emc(self.excitation.slice_grad_re_spoil.amplitude),
+            "gradientExcitationRephase": self._set_grad_for_emc(self.excitation.slice_grad_post.amplitude),
             "durationExcitationRephase": self.excitation.t_re_spoil * 1e6,
             "gradientExcitationVerse1": 0.0,
             "gradientExcitationVerse2": 0.0,
@@ -479,7 +461,7 @@ class SequenceBlockEvents:
             "refocusPhase": self.seq.params.refocusingRfPhase,
             "gradientRefocus": self._set_grad_for_emc(self.refocusing.slice_grad.amplitude),
             "durationRefocus": self.seq.params.refocusingDuration,
-            "gradientCrush": self._set_grad_for_emc(self.refocusing.slice_grad_re_spoil.amplitude),
+            "gradientCrush": self._set_grad_for_emc(self.refocusing.slice_grad_post.amplitude),
             "durationCrush": self.refocusing.t_re_spoil * 1e6,
             "gradientRefocusVerse1": 0.0,
             "gradientRefocusVerse2": 0.0,
@@ -501,14 +483,17 @@ class SequenceBlockEvents:
     def _calculate_min_esp(self):
         # find minimal echo spacing
 
-        # between excitation and refocus = esp / 2 -> rf with delay?
-        timing_excitation_refocus = pp.calc_duration(self.excitation.rf) / 2 + \
+        # between excitation and refocus = esp / 2 -> attention to calculating timing!
+        # the rf starts with the merged grads to use them later as a block event, this introduces a delay
+        # not part of the echo spacing. from the focal point of the rf we have half the duration + ringdown
+        timing_excitation_refocus = pp.calc_duration(self.excitation.slice_grad) / 2 + \
                                     self.excitation.t_re_spoil + \
-                                    pp.calc_duration(self.refocusing.rf[0]) / 2
+                                    self.refocusing.rf[0].shape_dur / 2 +\
+                                    self.refocusing.rf[0].delay
         timing_excitation_refocus = set_on_grad_raster_time(timing_excitation_refocus, system=self.seq.ppSys)
 
         # between refocus and adc = esp / 2
-        timing_refoucs_adc = pp.calc_duration(self.refocusing.rf[0]) / 2 + \
+        timing_refoucs_adc = pp.calc_duration(self.refocusing.slice_grad) / 2 + \
                              self.refocusing.t_re_spoil + \
                              pp.calc_duration(self.acquisition.read_grad) / 2
         timing_refoucs_adc = set_on_grad_raster_time(timing_refoucs_adc, system=self.seq.ppSys)
@@ -527,12 +512,16 @@ class SequenceBlockEvents:
         logModule.info(f"Found minimum TE: {esp * 1e3:.2f} ms")
 
         self.t_duration_echo_train = set_on_grad_raster_time(
-            pp.calc_duration(self.excitation.slice_grad_prewind) +
-            pp.calc_duration(self.excitation.slice_grad_ru) +  # before middle of rf
-            (pp.calc_duration(self.excitation.rf) - pp.calc_duration(self.excitation.slice_grad_ru)) / 2 +
-            self.seq.params.ETL * esp +  # whole TE train
-            pp.calc_duration(self.acquisition.read_grad) / 2 +  # half of last read gradient
-            pp.calc_duration(self.refocusing.slice_grad_re_spoil),  # spoiler
+            # prewind gradient
+            pp.calc_duration(self.excitation.slice_grad_pre) +
+            # first half of slice sel grad / rf
+            pp.calc_duration(self.excitation.slice_grad) / 2 +
+            # etl * esp -> we land on the middle of the last adc
+            self.seq.params.ETL * esp +
+            # last half of last adc
+            pp.calc_duration(self.acquisition.read_grad) / 2 +
+            # final spoiling
+            pp.calc_duration(self.refocusing.slice_grad_post),  # spoiler
             system=self.seq.ppSys
         )
         logModule.info(f"echo train length: {self.t_duration_echo_train * 1e3:.2f} ms")
@@ -619,19 +608,25 @@ class SequenceBlockEvents:
         idx_phase = self.k_indexes[0, phase_idx]
         # set phase grads
         self.acquisition.set_phase_grads(idx_phase=idx_phase)
+        # set pre phasing
+        self.seq.ppSeq.add_block(self.excitation.slice_grad_pre)
 
         # excitation
-        self.seq.ppSeq.add_block(self.excitation.rf, self.excitation.slice_grad_ru)
+        self.seq.ppSeq.add_block(self.excitation.rf, self.excitation.slice_grad)
+
         # rephasing
-        self.seq.ppSeq.add_block(self.excitation.slice_grad_re_spoil, self.acquisition.read_grad_pre)
+        self.seq.ppSeq.add_block(self.excitation.slice_grad_post, self.acquisition.read_grad_pre)
+
         # delay if necessary
         if self.excitation.delay.delay > 1e-6:
             self.seq.ppSeq.add_block(self.excitation.delay)
 
-        # refocus
-        self.seq.ppSeq.add_block(self.refocusing.rf[0], self.refocusing.slice_grad_ru)
+        # first refocus
+        self.seq.ppSeq.add_block(self.refocusing.rf[0], self.refocusing.slice_grad_from_zero)
+
         # spoiling phase encode, delay if necessary
-        self.seq.ppSeq.add_block(self.refocusing.slice_grad_spoil_post, self.acquisition.phase_grad_pre_adc)
+        self.seq.ppSeq.add_block(self.refocusing.slice_grad_post, self.acquisition.phase_grad_pre_adc)
+
         # delay if necessary
         if self.refocusing.delay.delay > 1e-6:
             self.seq.ppSeq.add_block(self.refocusing.delay)
@@ -650,7 +645,7 @@ class SequenceBlockEvents:
                 self.seq.ppSeq.add_block(self.refocusing.delay)
 
             # dephase, spoil
-            self.seq.ppSeq.add_block(self.acquisition.phase_grad_post_adc, self.refocusing.slice_grad_spoil_pre)
+            self.seq.ppSeq.add_block(self.acquisition.phase_grad_post_adc, self.refocusing.slice_grad_pre)
 
             # refocus
             self.seq.ppSeq.add_block(self.refocusing.rf[contrast_idx], self.refocusing.slice_grad)
@@ -663,7 +658,7 @@ class SequenceBlockEvents:
             # set phase
             self.acquisition.set_phase_grads(idx_phase=idx_phase)
             self.seq.ppSeq.add_block(
-                self.acquisition.phase_grad_pre_adc, self.refocusing.slice_grad_spoil_post)
+                self.acquisition.phase_grad_pre_adc, self.refocusing.slice_grad_post)
             # read
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
@@ -675,7 +670,7 @@ class SequenceBlockEvents:
         # spoil end
         self.seq.ppSeq.add_block(
             self.acquisition.phase_grad_post_adc,
-            self.refocusing.slice_grad_re_spoil,
+            self.refocusing.slice_grad_post_from_zero,
             self.acquisition.read_grad_pre
         )
         self.seq.ppSeq.add_block(self.t_delay_slice)
