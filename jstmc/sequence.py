@@ -449,6 +449,7 @@ class SequenceBlockEvents:
             "bw": self.seq.params.bandwidth,
             "gradMode": "Normal",
             "excitationAngle": self.seq.params.excitationRadFA / np.pi * 180.0,
+            "excitationPhase": self.seq.params.excitationRfPhase,
             "gradientExcitation": self._set_grad_for_emc(self.excitation.slice_grad.amplitude),
             "durationExcitation": self.seq.params.excitationDuration,
             "gradientExcitationRephase": self._set_grad_for_emc(self.excitation.slice_grad_post.amplitude),
