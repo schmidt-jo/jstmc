@@ -222,11 +222,12 @@ class SliceGradPulse:
         )
         if self.is_excitation:
             self.rf = rf
+            self.rf.init_phase = self.rf.phase_offset
             self.slice_grad_post = slice_grad_re
         else:
             self.rf = []
             for k in range(flip_angle_rad.__len__()):
-                self.rf.append(pp.make_sinc_pulse(
+                rf = pp.make_sinc_pulse(
                     flip_angle=flip_angle_rad[k],
                     phase_offset=phase_rad[k],
                     delay=rf.delay,
@@ -238,7 +239,9 @@ class SliceGradPulse:
                     slice_thickness=slice_thickness,
                     return_gz=False,
                     use=use
-                ))
+                )
+                rf.init_phase = phase_rad[k]
+                self.rf.append(rf)
 
     def _recalculate_rephase_grad(self):
         # calculate spoil grad area -> cast thickness from mm to m
@@ -522,7 +525,7 @@ class SequenceBlockEvents:
             # last half of last adc
             pp.calc_duration(self.acquisition.read_grad) / 2 +
             # final spoiling
-            pp.calc_duration(self.refocusing.slice_grad_post),  # spoiler
+            pp.calc_duration(self.refocusing.slice_grad_post),
             system=self.seq.ppSys
         )
         logModule.info(f"echo train length: {self.t_duration_echo_train * 1e3:.2f} ms")
@@ -601,7 +604,7 @@ class SequenceBlockEvents:
             rf = self.refocusing.rf[pulse_num]
         # apply slice offset -> caution grad_amp in rad!
         freq_offset = grad_amplitude * self.z[idx_slice]
-        phase_offset = rf.phase_offset - freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
+        phase_offset = rf.init_phase - freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
         return np.divide(freq_offset, 2 * np.pi), phase_offset, freq_offset * pp.calc_rf_center(rf)[0]  # casting
         # freq to Hz, phase is in radiant here
 
