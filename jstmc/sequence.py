@@ -146,8 +146,8 @@ class SliceGradPulse:
             time_bw_prod = self.params.excitationTimeBwProd
             duration = self.params.excitationDuration * 1e-6
         else:
-            flip_angle_rad = self.params.refocusingRadFA        # these are lists now!
-            phase_rad = self.params.refocusingRadRfPhase        # these are lists now!
+            flip_angle_rad = self.params.refocusingRadFA  # these are lists now!
+            phase_rad = self.params.refocusingRadRfPhase  # these are lists now!
             time_bw_prod = self.params.refocusingTimeBwProd
             duration = self.params.refocusingDuration * 1e-6
 
@@ -388,7 +388,7 @@ class SliceGradPulse:
             amplitudes=np.array([
                 0.0, self.slice_grad.amplitude, self.slice_grad.amplitude, interpol_gradient_slice_sel_to_spoil]),
             times=np.array([
-                0.0, rise, rise + flat_time, 2*rise + flat_time
+                0.0, rise, rise + flat_time, 2 * rise + flat_time
             ])
         )
 
@@ -420,10 +420,10 @@ class SequenceBlockEvents:
         # Refocusing
         logModule.info("Setting up Refocusing")
         self.refocusing = SliceGradPulse(
-                    params=self.seq.params,
-                    system=self.seq.ppSys,
-                    t_xy_grad=self.acquisition.get_t_phase(),
-                    is_excitation=False)
+            params=self.seq.params,
+            system=self.seq.ppSys,
+            t_xy_grad=self.acquisition.get_t_phase(),
+            is_excitation=False)
         if self.refocusing.check_post_slice_selection_timing():
             logModule.info(f"Spoiling timing longer than phase encode, readjusting phase enc timing")
             self.acquisition.reset_t_phase(self.refocusing.get_timing_post_slice_selection())
@@ -492,7 +492,7 @@ class SequenceBlockEvents:
         # not part of the echo spacing. from the focal point of the rf we have half the duration + ringdown
         timing_excitation_refocus = pp.calc_duration(self.excitation.slice_grad) / 2 + \
                                     self.excitation.t_re_spoil + \
-                                    self.refocusing.rf[0].shape_dur / 2 +\
+                                    self.refocusing.rf[0].shape_dur / 2 + \
                                     self.refocusing.rf[0].delay
         timing_excitation_refocus = set_on_grad_raster_time(timing_excitation_refocus, system=self.seq.ppSys)
 
@@ -580,10 +580,10 @@ class SequenceBlockEvents:
 
     def _set_delta_slices(self):
         # multi-slice
-        # want to go through the slices alternating from beginning and middle
-        delta_z = self.seq.params.resolutionSliceThickness * self.seq.params.resolutionNumSlices * \
-                  (1 + self.seq.params.resolutionSliceGap / 100.0) * 1e-3  # cast from % / cast from mm
         numSlices = self.seq.params.resolutionNumSlices
+        # want to go through the slices alternating from beginning and middle
+        delta_z = self.seq.params.resolutionSliceThickness * numSlices * \
+                  (1 + self.seq.params.resolutionSliceGap / 100.0) * 1e-3  # cast from % / cast from mm
         self.z.flat[:numSlices] = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
         # reshuffle slices mid+1, 1, mid+2, 2, ...
         self.z = self.z.transpose().flatten()[:numSlices]
@@ -692,7 +692,8 @@ class SequenceBlockEvents:
                     is_excitation=True
                 )
                 for idx_rf in range(self.seq.params.ETL):
-                    self.refocusing.rf[idx_rf].freq_offset, self.refocusing.rf[idx_rf].phase_offset, _ = self._apply_slice_offset(
+                    self.refocusing.rf[idx_rf].freq_offset, self.refocusing.rf[
+                        idx_rf].phase_offset, _ = self._apply_slice_offset(
                         idx_slice=idx_slice,
                         is_excitation=False,
                         pulse_num=idx_rf
