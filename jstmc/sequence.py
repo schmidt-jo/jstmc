@@ -10,6 +10,7 @@ from jstmc import options
 import numpy as np
 import pypulseq as pp
 import tqdm
+import pathlib as plib
 
 logModule = logging.getLogger(__name__)
 
@@ -19,7 +20,33 @@ def set_on_grad_raster_time(time: float, system: pp.Opts):
 
 
 def load_external_rf(rf_file) -> np.ndarray:
-    # ToDo
+    """
+        if pulse profile is provided, read in
+        :param filename: name of file (txt or pta) of pulse
+        :return: pulse array, pulse length
+        """
+    # load file content
+    ext_file = plib.Path(rf_file)
+    with open(ext_file, "r") as f:
+        content = f.readlines()
+
+    # find line where actual data starts
+    start_count = -1
+    while True:
+        start_count += 1
+        line = content[start_count]
+        start_line = line.strip().split('\t')[0]
+        if start_line.replace('.', '', 1).isdigit():
+            break
+
+    # read to array
+    content = content[start_count:]
+    temp = [line.strip().split('\t')[0] for line in content]
+
+    pulseShape = np.array(temp, dtype=float)
+    return pulseShape
+
+
     pass
 
 
@@ -30,6 +57,7 @@ class Acquisition:
         # grad
         self.read_grad: types.SimpleNamespace = types.SimpleNamespace()
         self.read_grad_pre: types.SimpleNamespace = types.SimpleNamespace()
+        self.read_grad_spoil: types.SimpleNamespace = types.SimpleNamespace()
         # adc
         self.adc: types.SimpleNamespace = types.SimpleNamespace()
         # phase
@@ -55,6 +83,11 @@ class Acquisition:
         self.read_grad_pre = pp.make_trapezoid(
             channel=self.params.read_dir,
             area=self.read_grad.area / 2,
+            system=self.system
+        )
+        self.read_grad_spoil = pp.make_trapezoid(
+            channel=self.params.read_dir,
+            area=self.read_grad.area / 3,
             system=self.system
         )
         self.t_read_pre = pp.calc_duration(self.read_grad_pre)
@@ -176,7 +209,7 @@ class SliceGradPulse:
             self.slice_grad_pre: types.SimpleNamespace = pp.make_trapezoid(
                 'z',
                 area=-self.params.excitationPreMoment,
-                max_slew=0.8 * self.system.max_slew
+                max_slew=self.system.max_slew
             )
             # if excitation we adjust rephasing + spoiling
             self._recalculate_rephase_grad()
@@ -199,6 +232,46 @@ class SliceGradPulse:
         # cast all to array
         flip_angle_rad = np.asarray(flip_angle_rad)
         phase_rad = np.asarray(phase_rad)
+        if self.params.useExtRf:
+            rf, self.slice_grad, slice_grad_re = self._make_ext_rf_pulse(
+                flip_angle_rad=flip_angle_rad[0], phase_rad=phase_rad[0],
+                duration=duration, slice_thickness=slice_thickness
+            )
+        else:
+            rf, self.slice_grad, slice_grad_re = self._make_sinc_pulse(
+                flip_angle_rad=flip_angle_rad[0], phase_rad=phase_rad[0],
+                tbw=time_bw_prod, duration=duration,
+                slice_thickness=slice_thickness
+            )
+
+        if self.is_excitation:
+            self.rf = rf
+            self.rf.init_phase = self.rf.phase_offset
+            self.slice_grad_post = slice_grad_re
+        else:
+            self.rf = []
+            for k in range(flip_angle_rad.__len__()):
+                if self.params.useExtRf:
+                    rf, _, _ = self._make_ext_rf_pulse(
+                        flip_angle_rad=flip_angle_rad[k],
+                        phase_rad=phase_rad[k],
+                        delay=rf.delay,
+                        duration=duration,
+                        slice_thickness=slice_thickness,
+                    )
+                else:
+                    rf, _, _ = self._make_sinc_pulse(
+                        flip_angle_rad=flip_angle_rad[k],
+                        phase_rad=phase_rad[k],
+                        delay=rf.delay,
+                        tbw=time_bw_prod,
+                        duration=duration,
+                        slice_thickness=slice_thickness,
+                    )
+                rf.init_phase = phase_rad[k]
+                self.rf.append(rf)
+
+    def _make_sinc_pulse(self, flip_angle_rad, phase_rad, tbw, duration, slice_thickness, delay=0.0):
         if self.is_excitation:
             use = "excitation"
             # can change apodization here
@@ -207,41 +280,47 @@ class SliceGradPulse:
             use = "refocusing"
             # can change apodization here
             apodization = 0.0
-        rf, self.slice_grad, slice_grad_re = pp.make_sinc_pulse(
-            flip_angle=flip_angle_rad[0],
-            phase_offset=phase_rad[0],
-            delay=0.0,
+        rf, slice_grad, slice_grad_re = pp.make_sinc_pulse(
+            flip_angle=flip_angle_rad,
+            phase_offset=phase_rad,
+            delay=delay,
             apodization=apodization,
-            time_bw_product=time_bw_prod,
+            time_bw_product=tbw,
             duration=duration,
-            max_slew=0.8 * self.system.max_slew,
+            max_slew=self.system.max_slew,
             system=self.system,
             slice_thickness=slice_thickness,
             return_gz=True,
             use=use
         )
+        return rf, slice_grad, slice_grad_re
+
+    def _make_ext_rf_pulse(self, flip_angle_rad, phase_rad, duration, slice_thickness, delay=0.0):
         if self.is_excitation:
-            self.rf = rf
-            self.rf.init_phase = self.rf.phase_offset
-            self.slice_grad_post = slice_grad_re
+            use = "excitation"
         else:
-            self.rf = []
-            for k in range(flip_angle_rad.__len__()):
-                rf = pp.make_sinc_pulse(
-                    flip_angle=flip_angle_rad[k],
-                    phase_offset=phase_rad[k],
-                    delay=rf.delay,
-                    apodization=apodization,
-                    time_bw_product=time_bw_prod,
-                    duration=duration,
-                    max_slew=0.8 * self.system.max_slew,
-                    system=self.system,
-                    slice_thickness=slice_thickness,
-                    return_gz=False,
-                    use=use
-                )
-                rf.init_phase = phase_rad[k]
-                self.rf.append(rf)
+            use = "refocusing"
+        N = int(duration / self.system.rf_raster_time)
+        pulse_shape = load_external_rf(self.params.useExtRf)
+        bandwidth = 1.92 / duration  # for gauss pulse tbw = 1.92 -> specific to external pulse
+        # interpolate shape to duration raster
+        shape_to_duration = np.interp(
+            np.linspace(0, pulse_shape.shape[0], N),
+            np.arange(pulse_shape.shape[0]),
+            pulse_shape
+        )
+        rf, slice_grad = pp.make_arbitrary_rf(
+            signal=shape_to_duration, flip_angle=flip_angle_rad, phase_offset=phase_rad, bandwidth=bandwidth,
+            delay=delay, max_slew=self.system.max_slew,
+            return_gz=True, slice_thickness=slice_thickness, system=self.system, use=use
+        )
+        slice_grad_re = pp.make_trapezoid(
+            channel="z",
+            system=self.system,
+            area=-slice_grad.area * 0.5,
+        )
+        return rf, slice_grad, slice_grad_re
+
 
     def _recalculate_rephase_grad(self):
         # calculate spoil grad area -> cast thickness from mm to m
@@ -306,7 +385,7 @@ class SliceGradPulse:
             logModule.error(err)
             raise ValueError(err)
 
-        rise = self.slice_grad.rise_time
+        rise = set_on_grad_raster_time(self.slice_grad.rise_time,self.system)
         # sanity check rise and fall times to equal
         if np.abs(self.slice_grad.fall_time - rise) > 0:
             err = f"rise time and fall time not equal"
@@ -314,7 +393,7 @@ class SliceGradPulse:
             raise ValueError(err)
 
         amp = self.slice_grad.amplitude
-        flat_time = self.slice_grad.flat_time
+        flat_time = set_on_grad_raster_time(self.slice_grad.flat_time, self.system)
 
         # --- merge at edges ---
         # we want to interpolate between the pre gradient ramp down and slice selection ramp up
@@ -581,12 +660,15 @@ class SequenceBlockEvents:
     def _set_delta_slices(self):
         # multi-slice
         numSlices = self.seq.params.resolutionNumSlices
-        # want to go through the slices alternating from beginning and middle
         delta_z = self.seq.params.resolutionSliceThickness * numSlices * \
                   (1 + self.seq.params.resolutionSliceGap / 100.0) * 1e-3  # cast from % / cast from mm
-        self.z.flat[:numSlices] = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
-        # reshuffle slices mid+1, 1, mid+2, 2, ...
-        self.z = self.z.transpose().flatten()[:numSlices]
+        if self.seq.params.interleavedAcquisition:
+            # want to go through the slices alternating from beginning and middle
+            self.z.flat[:numSlices] = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
+            # reshuffle slices mid+1, 1, mid+2, 2, ...
+            self.z = self.z.transpose().flatten()[:numSlices]
+        else:
+            self.z = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
         # find reshuffled slice numbers
         for idx_slice_num in range(numSlices):
             z_val = self.z[idx_slice_num]
@@ -605,7 +687,7 @@ class SequenceBlockEvents:
         # apply slice offset -> caution grad_amp in rad!
         freq_offset = grad_amplitude * self.z[idx_slice]
         phase_offset = rf.init_phase - freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
-        return np.divide(freq_offset, 2 * np.pi), phase_offset, freq_offset * pp.calc_rf_center(rf)[0]  # casting
+        return freq_offset, phase_offset, freq_offset * pp.calc_rf_center(rf)[0]  # casting
         # freq to Hz, phase is in radiant here
 
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
@@ -675,7 +757,7 @@ class SequenceBlockEvents:
         self.seq.ppSeq.add_block(
             self.acquisition.phase_grad_post_adc,
             self.refocusing.slice_grad_post_from_zero,
-            self.acquisition.read_grad_pre
+            self.acquisition.read_grad_spoil
         )
         self.seq.ppSeq.add_block(self.t_delay_slice)
 

@@ -50,6 +50,7 @@ def main():
         path = Path("test/images").absolute()
 
         utils.pretty_plot_et(seq, t_start=seq.params.TR)  # , save=path.joinpath("echo_train.png"))
+        utils.pretty_plot_et(seq, t_start=1e3 * scan_time / 2 - 2 * seq.params.TR)  # , save=path.joinpath("echo_train.png"))
 
         seq.ppSeq.plot(time_range=(0, 2e-3 * seq.params.TR), time_disp='s')
         # seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
