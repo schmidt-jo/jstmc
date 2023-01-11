@@ -669,9 +669,8 @@ class SequenceBlockEvents:
     def _set_delta_slices(self):
         # multi-slice
         numSlices = self.seq.params.resolutionNumSlices
-        sliThick = self.seq.params.resolutionSliceThickness
-        # there is one gap less than number of slices, cast  thickness from mm / gap from %
-        delta_z = sliThick * (numSlices + self.seq.params.resolutionSliceGap / 100.0 * (numSlices - 1)) * 1e-3
+        # cast from mm
+        delta_z = self.seq.params.z_extend * 1e-3
         if self.seq.params.interleavedAcquisition:
             logModule.info("Set interleaved Acquisition")
             # want to go through the slices alternating from beginning and middle
@@ -697,7 +696,7 @@ class SequenceBlockEvents:
             grad_amplitude = self.refocusing.slice_grad.amplitude
             rf = self.refocusing.rf[pulse_num]
         # apply slice offset -> caution grad_amp in rad!
-        freq_offset = grad_amplitude * self.z[idx_slice]
+        freq_offset = - grad_amplitude * self.z[idx_slice]
         phase_offset = rf.init_phase - 2 * np.pi * freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
         return freq_offset, phase_offset  # casting
         # freq to Hz, phase is in radiant here

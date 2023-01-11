@@ -92,6 +92,9 @@ class SequenceParameters(helpers.Serializable):
         self.deltaK_read = 1e3 / self.resolutionFovRead  # cast to m
         self.deltaK_phase = 1e3 / (self.resolutionFovRead * self.resolutionFovPhase / 100.0)  # cast to m
         self.TE = np.arange(1, self.ETL + 1) * self.ESP  # [ms] echo times
+        # there is one gap less than number of slices,
+        self.z_extend = self.resolutionSliceThickness * (
+                self.resolutionNumSlices + self.resolutionSliceGap / 100.0 * (self.resolutionNumSlices - 1))
         # acc
         self.numberOfOuterLines = round((self.resolutionNPhase - self.numberOfCentralLines) / self.accelerationFactor)
         # sequence
@@ -143,9 +146,9 @@ class SequenceParameters(helpers.Serializable):
         return self.resolutionVoxelSizeRead, self.resolutionVoxelSizePhase, self.resolutionSliceThickness
 
     def get_fov(self):
-        fov_read = 1e-3 * self.resolutionVoxelSizeRead * 64
-        fov_phase = 1e-3 * self.resolutionVoxelSizePhase * 64
-        fov_slice = self.resolutionSliceThickness * 1e-3 * self.resolutionNumSlices * (1 + self.resolutionSliceGap/100)
+        fov_read = 1e-3 * self.resolutionFovRead / 64
+        fov_phase = 1e-3 * self.resolutionFovPhase / 64
+        fov_slice = self.z_extend * 1e-3
         return fov_read, fov_phase, fov_slice
 
     def set_esp(self, esp: float):
