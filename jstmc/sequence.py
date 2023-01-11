@@ -605,7 +605,7 @@ class SequenceBlockEvents:
         # apply slice offset -> caution grad_amp in rad!
         freq_offset = grad_amplitude * self.z[idx_slice]
         phase_offset = rf.init_phase - freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
-        return np.divide(freq_offset, 2 * np.pi), phase_offset, freq_offset * pp.calc_rf_center(rf)[0]  # casting
+        return np.divide(freq_offset, 2 * np.pi), phase_offset  # casting
         # freq to Hz, phase is in radiant here
 
     def _add_blocks_excitation_first_read(self, phase_idx: int, slice_idx: int):
@@ -687,13 +687,12 @@ class SequenceBlockEvents:
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             for idx_slice in range(self.seq.params.resolutionNumSlices):
                 # apply slice offset
-                self.excitation.rf.freq_offset, self.excitation.rf.phase_offset, _ = self._apply_slice_offset(
+                self.excitation.rf.freq_offset, self.excitation.rf.phase_offset = self._apply_slice_offset(
                     idx_slice=idx_slice,
                     is_excitation=True
                 )
                 for idx_rf in range(self.seq.params.ETL):
-                    self.refocusing.rf[idx_rf].freq_offset, self.refocusing.rf[
-                        idx_rf].phase_offset, _ = self._apply_slice_offset(
+                    self.refocusing.rf[idx_rf].freq_offset, self.refocusing.rf[idx_rf].phase_offset = self._apply_slice_offset(
                         idx_slice=idx_slice,
                         is_excitation=False,
                         pulse_num=idx_rf
