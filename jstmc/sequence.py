@@ -144,6 +144,12 @@ class Acquisition:
             duration=t_read_grad_pre,
             system=self.system
         )
+        self.read_grad_spoil = pp.make_trapezoid(
+            channel=self.params.read_dir,
+            area=self.read_grad_spoil.area,
+            duration=t_read_grad_pre,
+            system=self.system
+        )
 
     def get_t_read_grad_pre(self) -> float:
         return self.t_read_pre
@@ -233,6 +239,8 @@ class SliceGradPulse:
         flip_angle_rad = np.asarray(flip_angle_rad)
         phase_rad = np.asarray(phase_rad)
         if self.params.useExtRf:
+
+            logModule.info(f"Loading external RF File: {self.params.useExtRf}")
             rf, self.slice_grad, slice_grad_re = self._make_ext_rf_pulse(
                 flip_angle_rad=flip_angle_rad[0], phase_rad=phase_rad[0],
                 duration=duration, slice_thickness=slice_thickness
@@ -257,7 +265,7 @@ class SliceGradPulse:
                         phase_rad=phase_rad[k],
                         delay=rf.delay,
                         duration=duration,
-                        slice_thickness=slice_thickness,
+                        slice_thickness=slice_thickness
                     )
                 else:
                     rf, _, _ = self._make_sinc_pulse(
@@ -266,7 +274,7 @@ class SliceGradPulse:
                         delay=rf.delay,
                         tbw=time_bw_prod,
                         duration=duration,
-                        slice_thickness=slice_thickness,
+                        slice_thickness=slice_thickness
                     )
                 rf.init_phase = phase_rad[k]
                 self.rf.append(rf)
@@ -280,7 +288,7 @@ class SliceGradPulse:
             use = "refocusing"
             # can change apodization here
             apodization = 0.0
-        rf, slice_grad, slice_grad_re = pp.make_sinc_pulse(
+        return pp.make_sinc_pulse(
             flip_angle=flip_angle_rad,
             phase_offset=phase_rad,
             delay=delay,
@@ -293,16 +301,17 @@ class SliceGradPulse:
             return_gz=True,
             use=use
         )
-        return rf, slice_grad, slice_grad_re
 
     def _make_ext_rf_pulse(self, flip_angle_rad, phase_rad, duration, slice_thickness, delay=0.0):
         if self.is_excitation:
             use = "excitation"
+            scale_gz = 1.0
         else:
             use = "refocusing"
+            scale_gz = 2/3
+        bandwidth = 1.92 / duration   # for gauss pulse tbw = 1.92 -> specific to external pulse
         N = int(duration / self.system.rf_raster_time)
         pulse_shape = load_external_rf(self.params.useExtRf)
-        bandwidth = 1.92 / duration  # for gauss pulse tbw = 1.92 -> specific to external pulse
         # interpolate shape to duration raster
         shape_to_duration = np.interp(
             np.linspace(0, pulse_shape.shape[0], N),
@@ -311,16 +320,16 @@ class SliceGradPulse:
         )
         rf, slice_grad = pp.make_arbitrary_rf(
             signal=shape_to_duration, flip_angle=flip_angle_rad, phase_offset=phase_rad, bandwidth=bandwidth,
-            delay=delay, max_slew=self.system.max_slew,
-            return_gz=True, slice_thickness=slice_thickness, system=self.system, use=use
+            delay=delay, max_slew=self.system.max_slew, return_gz=True,
+            slice_thickness=slice_thickness, system=self.system, use=use
         )
+        slice_grad.amplitude *= scale_gz
         slice_grad_re = pp.make_trapezoid(
             channel="z",
             system=self.system,
             area=-slice_grad.area * 0.5,
         )
         return rf, slice_grad, slice_grad_re
-
 
     def _recalculate_rephase_grad(self):
         # calculate spoil grad area -> cast thickness from mm to m
@@ -375,7 +384,7 @@ class SliceGradPulse:
         rf = self.rf
         if isinstance(self.rf, list):
             rf = self.rf[0]
-        if np.abs(rf.delay - self.slice_grad.rise_time) > self.system.grad_raster_time:
+        if np.abs(rf.delay - self.slice_grad.rise_time - self.slice_grad.delay) > self.system.grad_raster_time:
             err = f"rf delay ({1e3 * rf.delay:.2f} ms) != slice selective gradient rise time (" \
                   f"{1e3 * self.slice_grad.rise_time:.2f} ms). But events are supposed to start in same block"
             logModule.error(err)
@@ -660,14 +669,17 @@ class SequenceBlockEvents:
     def _set_delta_slices(self):
         # multi-slice
         numSlices = self.seq.params.resolutionNumSlices
-        delta_z = self.seq.params.resolutionSliceThickness * numSlices * \
-                  (1 + self.seq.params.resolutionSliceGap / 100.0) * 1e-3  # cast from % / cast from mm
+        sliThick = self.seq.params.resolutionSliceThickness
+        # there is one gap less than number of slices, cast  thickness from mm / gap from %
+        delta_z = sliThick * (numSlices + self.seq.params.resolutionSliceGap / 100.0 * (numSlices - 1)) * 1e-3
         if self.seq.params.interleavedAcquisition:
+            logModule.info("Set interleaved Acquisition")
             # want to go through the slices alternating from beginning and middle
             self.z.flat[:numSlices] = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
             # reshuffle slices mid+1, 1, mid+2, 2, ...
             self.z = self.z.transpose().flatten()[:numSlices]
         else:
+            logModule.info("Set sequential Acquisition")
             self.z = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
         # find reshuffled slice numbers
         for idx_slice_num in range(numSlices):
@@ -686,7 +698,7 @@ class SequenceBlockEvents:
             rf = self.refocusing.rf[pulse_num]
         # apply slice offset -> caution grad_amp in rad!
         freq_offset = grad_amplitude * self.z[idx_slice]
-        phase_offset = rf.init_phase - freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
+        phase_offset = rf.init_phase - 2 * np.pi * freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
         return freq_offset, phase_offset  # casting
         # freq to Hz, phase is in radiant here
 
