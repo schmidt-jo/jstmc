@@ -43,6 +43,11 @@ class ScannerSpecs(helpers.Serializable):
     adc_dead_time: float = 20e-6
     gamma: float = 42577478.518  # [Hz/T]
 
+    def __post_init__(self):
+        # safety margins
+        self.max_slew *= 0.8
+        self.max_grad *= 0.95
+
 
 @dc.dataclass
 class SequenceParameters(helpers.Serializable):
@@ -71,6 +76,8 @@ class SequenceParameters(helpers.Serializable):
     refocusingTimeBwProd: float = 2.0
 
     spoilerScaling: float = 1.1
+    interleavedAcquisition: bool = True
+    useExtRf: str = ""
 
     ESP: float = 7.6  # [ms] echo spacing
     ETL: int = 8  # echo train length
