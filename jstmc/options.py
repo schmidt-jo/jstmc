@@ -94,7 +94,7 @@ class SequenceParameters(helpers.Serializable):
         self.TE = np.arange(1, self.ETL + 1) * self.ESP  # [ms] echo times
         # there is one gap less than number of slices,
         self.z_extend = self.resolutionSliceThickness * (
-                self.resolutionNumSlices + self.resolutionSliceGap / 100.0 * (self.resolutionNumSlices - 1))
+                self.resolutionNumSlices + self.resolutionSliceGap / 100.0 * (self.resolutionNumSlices - 1))    # in mm
         # acc
         self.numberOfOuterLines = round((self.resolutionNPhase - self.numberOfCentralLines) / self.accelerationFactor)
         # sequence

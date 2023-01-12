@@ -770,7 +770,6 @@ class SequenceBlockEvents:
             # refocus
             grad_amplitude = self.refocusing.slice_grad.amplitude
             rf = self.refocusing.rf[pulse_num]
-        # apply slice offset -> caution grad_amp in rad!
         freq_offset = - grad_amplitude * self.z[idx_slice]
         phase_offset = rf.init_phase - 2 * np.pi * freq_offset * pp.calc_rf_center(rf)[0]  # radiant again
         return freq_offset, phase_offset  # casting
@@ -904,6 +903,10 @@ class SequenceBlockEvents:
         # write info into seq obj
         self._write_emc_info()
         return self.seq
+
+    def get_z(self):
+        # get slice extend
+        return self.z
 
     def get_emc_info(self) -> dict:
         return self._write_emc_info()
