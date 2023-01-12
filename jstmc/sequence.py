@@ -840,7 +840,7 @@ class SequenceBlockEvents:
         self.seq.ppSeq.add_block(
             self.acquisition.phase_grad_post_adc,
             self.refocusing.slice_grad_post_from_zero,
-            self.acquisition.read_grad_spoil
+            self.acquisition.read_grad_end
         )
         self.seq.ppSeq.add_block(self.t_delay_slice)
 
