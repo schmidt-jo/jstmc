@@ -146,8 +146,8 @@ class SequenceParameters(helpers.Serializable):
         return self.resolutionVoxelSizeRead, self.resolutionVoxelSizePhase, self.resolutionSliceThickness
 
     def get_fov(self):
-        fov_read = 1e-3 * self.resolutionFovRead / 64
-        fov_phase = 1e-3 * self.resolutionFovPhase / 64
+        fov_read = 1e-3 * self.resolutionFovRead * 64
+        fov_phase = 1e-3 * self.resolutionFovPhase * 64
         fov_slice = self.z_extend * 1e-3
         return fov_read, fov_phase, fov_slice
 

@@ -58,6 +58,7 @@ class Acquisition:
         self.read_grad: types.SimpleNamespace = types.SimpleNamespace()
         self.read_grad_pre: types.SimpleNamespace = types.SimpleNamespace()
         self.read_grad_spoil: types.SimpleNamespace = types.SimpleNamespace()
+        self.read_grad_end: types.SimpleNamespace = types.SimpleNamespace()
         # adc
         self.adc: types.SimpleNamespace = types.SimpleNamespace()
         # phase
@@ -82,12 +83,17 @@ class Acquisition:
         )
         self.read_grad_pre = pp.make_trapezoid(
             channel=self.params.read_dir,
-            area=self.read_grad.area / 2,
+            area=7 * self.read_grad.area / 10,
             system=self.system
         )
         self.read_grad_spoil = pp.make_trapezoid(
             channel=self.params.read_dir,
-            area=self.read_grad.area / 3,
+            area=self.read_grad.area / 5,
+            system=self.system
+        )
+        self.read_grad_end = pp.make_trapezoid(
+            channel=self.params.read_dir,
+            area=self.read_grad.area / 7,
             system=self.system
         )
         self.t_read_pre = pp.calc_duration(self.read_grad_pre)
@@ -144,9 +150,17 @@ class Acquisition:
             duration=t_read_grad_pre,
             system=self.system
         )
+
+    def reset_read_grad_spoil(self, t_read_grad_pre: float):
         self.read_grad_spoil = pp.make_trapezoid(
             channel=self.params.read_dir,
             area=self.read_grad_spoil.area,
+            duration=t_read_grad_pre,
+            system=self.system
+        )
+        self.read_grad_end = pp.make_trapezoid(
+            channel=self.params.read_dir,
+            area=self.read_grad_end.area,
             duration=t_read_grad_pre,
             system=self.system
         )
@@ -513,8 +527,9 @@ class SequenceBlockEvents:
             t_xy_grad=self.acquisition.get_t_phase(),
             is_excitation=False)
         if self.refocusing.check_post_slice_selection_timing():
-            logModule.info(f"Spoiling timing longer than phase encode, readjusting phase enc timing")
+            logModule.info(f"Spoiling timing longer than phase encode, readjusting phase enc timing & read spoiler")
             self.acquisition.reset_t_phase(self.refocusing.get_timing_post_slice_selection())
+            self.acquisition.reset_read_grad_spoil(self.refocusing.get_timing_post_slice_selection())
 
         # Timing
         self.t_duration_echo_train: float = 0.0
@@ -561,6 +576,58 @@ class SequenceBlockEvents:
             "durationRefocusVerse2": 0.0
         }
         return emc_dict
+
+    def check_timing(self):
+        t_slice_grad_rephase = pp.calc_duration(self.excitation.slice_grad_post)
+        t_slice_grad_post = pp.calc_duration(self.refocusing.slice_grad_post)
+        t_slice_grad_pre = pp.calc_duration(self.refocusing.slice_grad_pre)
+        t_slice_grad_exci_half = pp.calc_duration(self.excitation.slice_grad) / 2
+        t_slice_grad_ref_1 = pp.calc_duration(self.refocusing.slice_grad_from_zero)
+        t_slice_grad_ref = pp.calc_duration(self.refocusing.slice_grad)
+
+        t_read_grad_pre = pp.calc_duration(self.acquisition.read_grad_pre)
+        t_read_grad_spoil = pp.calc_duration(self.acquisition.read_grad_spoil)
+        t_read_half = pp.calc_duration(self.acquisition.read_grad) / 2
+
+        t_adc_half = pp.calc_duration(self.acquisition.adc) / 2
+
+        t_phase_grad_pre_adc = self.acquisition.get_t_phase()
+        t_phase_grad_post_adc = self.acquisition.get_t_phase()
+
+        t_delay_exc = self.excitation.delay.delay
+        t_delay_ref = self.refocusing.delay.delay
+
+        t_rf_exci = pp.calc_duration(self.excitation.rf)
+        t_rf_ref = pp.calc_duration(self.refocusing.rf[0])
+
+        # go through sequence:
+        t_sum_1 = [
+            np.max([t_rf_exci / 2, t_slice_grad_exci_half]),  # excitation
+            np.max([t_slice_grad_rephase, t_read_grad_pre]),    # rephasing
+            t_delay_exc,  # delay
+            np.max([t_slice_grad_ref_1, t_rf_ref]),     # first refocus
+            np.max([t_slice_grad_post, t_phase_grad_pre_adc, t_read_grad_spoil]),     # spoiling
+            t_delay_ref,    # delay
+            np.max([t_adc_half, t_read_half])       # read
+        ]
+        t_sum_1 = np.sum(t_sum_1)
+        logModule.info(f"timing first echo time: {t_sum_1 * 1e3:.3f} ms")
+
+        # after first read
+        t_sum_2 = [
+            np.max([t_adc_half, t_read_half]),       # read
+            t_delay_ref,    # delay
+            np.max([t_phase_grad_post_adc, t_slice_grad_pre, t_read_grad_spoil]),   # dephase
+            np.max([t_rf_ref, t_slice_grad_ref]),   # refocus
+            np.max([t_phase_grad_pre_adc, t_slice_grad_post, t_read_grad_spoil]),   # spoil
+            np.max([t_read_half, t_adc_half])   # read
+        ]
+
+        t_sum_2 = np.sum(t_sum_2)
+        logModule.info(f"timing second / consecutive echo times: {t_sum_2 * 1e3:.3f} ms")
+
+        if np.abs(t_sum_1 - t_sum_2) > 1e-6:
+            logModule.error(f"timing mismatch echo spacing")
 
     def _set_grad_for_emc(self, grad):
         return 1e3 / self.seq.specs.gamma * grad
@@ -721,8 +788,10 @@ class SequenceBlockEvents:
         # first refocus
         self.seq.ppSeq.add_block(self.refocusing.rf[0], self.refocusing.slice_grad_from_zero)
 
-        # spoiling phase encode, delay if necessary
-        self.seq.ppSeq.add_block(self.refocusing.slice_grad_post, self.acquisition.phase_grad_pre_adc)
+        # spoiling (read & slice), phase encode
+        self.seq.ppSeq.add_block(
+            self.refocusing.slice_grad_post, self.acquisition.phase_grad_pre_adc, self.acquisition.read_grad_spoil
+        )
 
         # delay if necessary
         if self.refocusing.delay.delay > 1e-6:
@@ -741,8 +810,10 @@ class SequenceBlockEvents:
             if self.refocusing.delay.delay > 1e-6:
                 self.seq.ppSeq.add_block(self.refocusing.delay)
 
-            # dephase, spoil
-            self.seq.ppSeq.add_block(self.acquisition.phase_grad_post_adc, self.refocusing.slice_grad_pre)
+            # dephase, spoil (read & slice)
+            self.seq.ppSeq.add_block(
+                self.acquisition.phase_grad_post_adc, self.refocusing.slice_grad_pre, self.acquisition.read_grad_spoil
+            )
 
             # refocus
             self.seq.ppSeq.add_block(self.refocusing.rf[contrast_idx], self.refocusing.slice_grad)
@@ -755,7 +826,8 @@ class SequenceBlockEvents:
             # set phase
             self.acquisition.set_phase_grads(idx_phase=idx_phase)
             self.seq.ppSeq.add_block(
-                self.acquisition.phase_grad_pre_adc, self.refocusing.slice_grad_post)
+                self.acquisition.phase_grad_pre_adc, self.refocusing.slice_grad_post, self.acquisition.read_grad_spoil
+            )
             # read
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
@@ -773,6 +845,8 @@ class SequenceBlockEvents:
         self.seq.ppSeq.add_block(self.t_delay_slice)
 
     def _loop_lines(self):
+        # sanity checking
+        self.check_timing()
         # through phase encodes
         line_bar = tqdm.trange(
             self.seq.params.numberOfCentralLines + self.seq.params.numberOfOuterLines, desc="phase encodes"
