@@ -620,14 +620,21 @@ class SequenceBlockEvents:
             np.max([t_phase_grad_post_adc, t_slice_grad_pre, t_read_grad_spoil]),   # dephase
             np.max([t_rf_ref, t_slice_grad_ref]),   # refocus
             np.max([t_phase_grad_pre_adc, t_slice_grad_post, t_read_grad_spoil]),   # spoil
+            t_delay_ref,  # delay
             np.max([t_read_half, t_adc_half])   # read
         ]
 
         t_sum_2 = np.sum(t_sum_2)
         logModule.info(f"timing second / consecutive echo times: {t_sum_2 * 1e3:.3f} ms")
 
-        if np.abs(t_sum_1 - t_sum_2) > 1e-6:
-            logModule.error(f"timing mismatch echo spacing")
+        t_diff = t_sum_1 - t_sum_2
+        if t_diff > 1e-6:
+            logModule.info(f"timing mismatch echo spacing, inserting delay @refocusing")
+            self.refocusing.delay.delay += t_diff / 2
+        elif -t_diff > 1e-6:
+            logModule.info(f"timing mismatch echo spacing, inserting delay @excitation")
+            self.excitation.delay.delay += t_diff
+
 
     def _set_grad_for_emc(self, grad):
         return 1e3 / self.seq.specs.gamma * grad
@@ -828,6 +835,11 @@ class SequenceBlockEvents:
             self.seq.ppSeq.add_block(
                 self.acquisition.phase_grad_pre_adc, self.refocusing.slice_grad_post, self.acquisition.read_grad_spoil
             )
+
+            # delay if necessary
+            if self.refocusing.delay.delay > 1e-6:
+                self.seq.ppSeq.add_block(self.refocusing.delay)
+
             # read
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
 
