@@ -535,6 +535,8 @@ class SequenceBlockEvents:
         self.t_duration_echo_train: float = 0.0
         self.t_delay_slice: types.SimpleNamespace = pp.make_delay(0.0)
         self._calculate_min_esp()
+        self.t_delay_adjust_exci: types.SimpleNamespace = pp.make_delay(0.0)
+        self.t_delay_adjust_ref: types.SimpleNamespace = pp.make_delay(0.0)
 
         # k space
         self.k_indexes: np.ndarray = np.zeros(
@@ -630,11 +632,10 @@ class SequenceBlockEvents:
         t_diff = t_sum_1 - t_sum_2
         if t_diff > 1e-6:
             logModule.info(f"timing mismatch echo spacing, inserting delay @refocusing")
-            self.refocusing.delay.delay += t_diff / 2
+            self.t_delay_adjust_ref = pp.make_delay(t_diff / 2)
         elif -t_diff > 1e-6:
             logModule.info(f"timing mismatch echo spacing, inserting delay @excitation")
-            self.excitation.delay.delay += t_diff
-
+            self.t_delay_adjust_exci = pp.make_delay(t_diff / 2)
 
     def _set_grad_for_emc(self, grad):
         return 1e3 / self.seq.specs.gamma * grad
@@ -791,6 +792,8 @@ class SequenceBlockEvents:
         # delay if necessary
         if self.excitation.delay.delay > 1e-6:
             self.seq.ppSeq.add_block(self.excitation.delay)
+        self.seq.ppSeq.add_block(self.t_delay_adjust_exci)
+
 
         # first refocus
         self.seq.ppSeq.add_block(self.refocusing.rf[0], self.refocusing.slice_grad_from_zero)
@@ -803,6 +806,7 @@ class SequenceBlockEvents:
         # delay if necessary
         if self.refocusing.delay.delay > 1e-6:
             self.seq.ppSeq.add_block(self.refocusing.delay)
+        self.seq.ppSeq.add_block(self.t_delay_adjust_exci)
 
         # read
         self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
@@ -816,6 +820,7 @@ class SequenceBlockEvents:
             # delay if necessary
             if self.refocusing.delay.delay > 1e-6:
                 self.seq.ppSeq.add_block(self.refocusing.delay)
+            self.seq.ppSeq.add_block(self.t_delay_adjust_ref)
 
             # dephase, spoil (read & slice)
             self.seq.ppSeq.add_block(
@@ -839,6 +844,7 @@ class SequenceBlockEvents:
             # delay if necessary
             if self.refocusing.delay.delay > 1e-6:
                 self.seq.ppSeq.add_block(self.refocusing.delay)
+            self.seq.ppSeq.add_block(self.t_delay_adjust_ref)
 
             # read
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
