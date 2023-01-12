@@ -844,7 +844,7 @@ class SequenceBlockEvents:
             # delay if necessary
             if self.refocusing.delay.delay > 1e-6:
                 self.seq.ppSeq.add_block(self.refocusing.delay)
-            self.seq.ppSeq.add_block(self.t_delay_adjust_ref)
+            self.seq.ppSeq.add_block(self.t_delay_adjust_ref)   # final adjust
 
             # read
             self.seq.ppSeq.add_block(self.acquisition.read_grad, self.acquisition.adc)
