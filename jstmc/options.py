@@ -149,10 +149,16 @@ class SequenceParameters(helpers.Serializable):
         fov_read = 1e-3 * self.resolutionFovRead
         fov_phase = 1e-3 * self.resolutionFovRead * self.resolutionFovPhase / 100
         fov_slice = self.z_extend * 1e-3
-        logModule.info(
-            f"FOV Size [read, phase, slice] in mm: "
-            f"[{1e3*fov_read:.1f}, {1e3*fov_phase:.1f}, {1e3*fov_slice:.1f}]")
-        return fov_read, fov_phase, fov_slice
+        if self.read_dir == 'x':
+            logModule.info(
+                f"FOV Size [read, phase, slice] in mm: "
+                f"[{1e3*fov_read:.1f}, {1e3*fov_phase:.1f}, {1e3*fov_slice:.1f}]")
+            return fov_read, fov_phase, fov_slice
+        else:
+            logModule.info(
+                f"FOV Size [read, phase, slice] in mm: "
+                f"[{1e3*fov_phase:.1f}, {1e3*fov_read:.1f}, {1e3*fov_slice:.1f}]")
+            return fov_phase, fov_read, fov_slice
 
     def set_esp(self, esp: float):
         if esp < 1.0:
