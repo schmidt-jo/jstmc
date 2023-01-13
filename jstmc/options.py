@@ -151,12 +151,12 @@ class SequenceParameters(helpers.Serializable):
         fov_slice = self.z_extend * 1e-3
         if self.read_dir == 'x':
             logModule.info(
-                f"FOV Size [read, phase, slice] in mm: "
+                f"FOV (xyz) Size [read, phase, slice] in mm: "
                 f"[{1e3*fov_read:.1f}, {1e3*fov_phase:.1f}, {1e3*fov_slice:.1f}]")
             return fov_read, fov_phase, fov_slice
         else:
             logModule.info(
-                f"FOV Size [read, phase, slice] in mm: "
+                f"FOV (xyz) Size [phase, read, slice] in mm: "
                 f"[{1e3*fov_phase:.1f}, {1e3*fov_read:.1f}, {1e3*fov_slice:.1f}]")
             return fov_phase, fov_read, fov_slice
 
