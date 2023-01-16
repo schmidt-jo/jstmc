@@ -63,14 +63,19 @@ class SequenceParameters(helpers.Serializable):
     excitationRfPhase: float = 90.0  # °
     excitationDuration: int = 2500  # [us]
     excitationTimeBwProd: float = 2.0
-    excitationPreMoment: float = 1600.0    # mTus/m
+    excitationPreMoment: float = 0.0    # Hz/m
+    excitationRephaseMoment: float = 500.0  # Hz/m
 
     refocusingFA: List = dc.field(default_factory=lambda: [140.0])
     refocusingRfPhase: List = dc.field(default_factory=lambda: [140.0])  # °
     refocusingDuration: int = 3000  # [us]
     refocusingTimeBwProd: float = 2.0
+    refocusingCrusherMoment: float = 2000.0
+    refocusingScaleSliceGrad: float = 2/3   # adjust slice selective gradient sice of refocusing -
+    # caution: this broadens the slice profile of the pulse, the further away from 180 fa
+    # we possibly get saturation outside the slice
 
-    spoilerScaling: float = 1.1
+    sliceSpoilingMoment: float = 1500.0
     interleavedAcquisition: bool = True
     useExtRf: str = ""
 
