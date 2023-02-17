@@ -63,14 +63,19 @@ class SequenceParameters(helpers.Serializable):
     excitationRfPhase: float = 90.0  # °
     excitationDuration: int = 2500  # [us]
     excitationTimeBwProd: float = 2.0
-    excitationPreMoment: float = 1600.0    # mTus/m
+    excitationPreMoment: float = 0.0    # Hz/m
+    excitationRephaseMoment: float = 500.0  # Hz/m
 
     refocusingFA: List = dc.field(default_factory=lambda: [140.0])
     refocusingRfPhase: List = dc.field(default_factory=lambda: [140.0])  # °
     refocusingDuration: int = 3000  # [us]
     refocusingTimeBwProd: float = 2.0
+    refocusingCrusherMoment: float = 2000.0
+    refocusingScaleSliceGrad: float = 2/3   # adjust slice selective gradient sice of refocusing -
+    # caution: this broadens the slice profile of the pulse, the further away from 180 fa
+    # we possibly get saturation outside the slice
 
-    spoilerScaling: float = 1.1
+    sliceSpoilingMoment: float = 1500.0
     interleavedAcquisition: bool = True
     useExtRf: str = ""
 
@@ -92,6 +97,9 @@ class SequenceParameters(helpers.Serializable):
         self.deltaK_read = 1e3 / self.resolutionFovRead  # cast to m
         self.deltaK_phase = 1e3 / (self.resolutionFovRead * self.resolutionFovPhase / 100.0)  # cast to m
         self.TE = np.arange(1, self.ETL + 1) * self.ESP  # [ms] echo times
+        # there is one gap less than number of slices,
+        self.z_extend = self.resolutionSliceThickness * (
+                self.resolutionNumSlices + self.resolutionSliceGap / 100.0 * (self.resolutionNumSlices - 1))    # in mm
         # acc
         self.numberOfOuterLines = round((self.resolutionNPhase - self.numberOfCentralLines) / self.accelerationFactor)
         # sequence
@@ -143,10 +151,19 @@ class SequenceParameters(helpers.Serializable):
         return self.resolutionVoxelSizeRead, self.resolutionVoxelSizePhase, self.resolutionSliceThickness
 
     def get_fov(self):
-        fov_read = 1e-3 * self.resolutionVoxelSizeRead * 64
-        fov_phase = 1e-3 * self.resolutionVoxelSizePhase * 64
-        fov_slice = self.resolutionSliceThickness * 1e-3 * self.resolutionNumSlices * (1 + self.resolutionSliceGap/100)
-        return fov_read, fov_phase, fov_slice
+        fov_read = 1e-3 * self.resolutionFovRead
+        fov_phase = 1e-3 * self.resolutionFovRead * self.resolutionFovPhase / 100
+        fov_slice = self.z_extend * 1e-3
+        if self.read_dir == 'x':
+            logModule.info(
+                f"FOV (xyz) Size [read, phase, slice] in mm: "
+                f"[{1e3*fov_read:.1f}, {1e3*fov_phase:.1f}, {1e3*fov_slice:.1f}]")
+            return fov_read, fov_phase, fov_slice
+        else:
+            logModule.info(
+                f"FOV (xyz) Size [phase, read, slice] in mm: "
+                f"[{1e3*fov_phase:.1f}, {1e3*fov_read:.1f}, {1e3*fov_slice:.1f}]")
+            return fov_phase, fov_read, fov_slice
 
     def set_esp(self, esp: float):
         if esp < 1.0:

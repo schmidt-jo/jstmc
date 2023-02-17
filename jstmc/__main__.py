@@ -18,6 +18,7 @@ def main():
     sbe = sequence.SequenceBlockEvents(seq=seq)
     sbe.build()
     emc_info = sbe.get_emc_info()
+    z = sbe.get_z()
     sampling_pattern = sbe.get_sampling_pattern()
     pulse = sbe.get_pulse_amplitudes()
     seq = sbe.get_seq()
@@ -46,6 +47,7 @@ def main():
 
     if seq.config.visualize:
         logging.info("Plotting")
+        utils.plot_slice_acquisition(z, seq.params.resolutionSliceThickness*1e-3)
         utils.plot_sampling_pattern(sampling_pattern, seq_vars=seq)
         path = Path("test/images").absolute()
 

@@ -3,6 +3,7 @@ import typing
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpp
 import matplotlib.cm as cm
 from jstmc import options
 from pathlib import Path
@@ -209,6 +210,26 @@ def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
     ax.set_xticks(x_pos, labels=x_labels)
     ax.set_yticks(y_pos, labels=y_labels)
     ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.params.ETL)
+    plt.show()
+
+
+def plot_slice_acquisition(z: np.ndarray, thickness: float):
+    z *= 1e3
+    logging.info(f"plot slice acquisition scheme")
+    plt.style.use("ggplot")
+    fig = plt.figure()
+    ax = fig.add_subplot()
+    ax.set_title("slice acquisition scheme")
+    ax.set_ylim(1.1*np.min(z), 1.1 * np.max(z))
+    ax.set_xlim(-0.5, z.__len__()+1)
+    ax.set_xlabel("Acquisition Number")
+    ax.set_ylabel("Slice Position [mm]")
+    ax.vlines(-0.3, np.min(z)-thickness/2, np.max(z)+thickness/2, color="#229985")
+
+    x = np.arange(1, z.__len__()+1)
+    for idx in range(x.__len__()):
+        ax.add_patch(mpp.Rectangle((x[idx]-0.5, z[idx]-thickness/2), 1.0, thickness, color='#5d2299'))
+        ax.add_patch(mpp.Rectangle((-0.2, z[idx]-thickness/2), 0.1, thickness, color='#5d2299'))
     plt.show()
 
 
