@@ -11,42 +11,12 @@ import numpy as np
 import pypulseq as pp
 import tqdm
 import pathlib as plib
-
+from rf_pulse_files import rfpf
 logModule = logging.getLogger(__name__)
 
 
 def set_on_grad_raster_time(time: float, system: pp.Opts):
     return np.ceil(time / system.grad_raster_time) * system.grad_raster_time
-
-
-def load_external_rf(rf_file) -> np.ndarray:
-    """
-        if pulse profile is provided, read in
-        :param filename: name of file (txt or pta) of pulse
-        :return: pulse array, pulse length
-        """
-    # load file content
-    ext_file = plib.Path(rf_file)
-    with open(ext_file, "r") as f:
-        content = f.readlines()
-
-    # find line where actual data starts
-    start_count = -1
-    while True:
-        start_count += 1
-        line = content[start_count]
-        start_line = line.strip().split('\t')[0]
-        if start_line.replace('.', '', 1).isdigit():
-            break
-
-    # read to array
-    content = content[start_count:]
-    temp = [line.strip().split('\t')[0] for line in content]
-
-    pulseShape = np.array(temp, dtype=float)
-    return pulseShape
-
-    pass
 
 
 class Acquisition:
@@ -263,9 +233,9 @@ class SliceGradPulse:
         # cast all to array
         flip_angle_rad = np.asarray(flip_angle_rad)
         phase_rad = np.asarray(phase_rad)
-        if self.params.useExtRf:
+        if self.params.extRfExc:
 
-            logModule.info(f"Loading external RF File: {self.params.useExtRf}")
+            logModule.info(f"Loading external RF File: {self.params.extRfExc}")
             rf, self.slice_grad, slice_grad_re = self._make_ext_rf_pulse(
                 flip_angle_rad=flip_angle_rad[0], phase_rad=phase_rad[0],
                 duration=duration, slice_thickness=slice_thickness
@@ -284,7 +254,7 @@ class SliceGradPulse:
         else:
             self.rf = []
             for k in range(flip_angle_rad.__len__()):
-                if self.params.useExtRf:
+                if self.params.extRfExc:
                     rf, _, _ = self._make_ext_rf_pulse(
                         flip_angle_rad=flip_angle_rad[k],
                         phase_rad=phase_rad[k],
@@ -332,7 +302,7 @@ class SliceGradPulse:
         slice_grad_re = pp.make_trapezoid(
             channel="z",
             system=self.system,
-            area=-self.params.excitationRephaseMoment,
+            area=-self.params.excitationRephaseFactor,
         )
         return rf, slice_grad, slice_grad_re
 
@@ -340,28 +310,38 @@ class SliceGradPulse:
         if self.is_excitation:
             use = "excitation"
             scale_gz = 1.0
+            rf = rfpf.RF.load(self.params.extRfExc)
+            rf.resample_to_duration(self.params.excitationDuration)
+            rf.phase += phase_rad
         else:
             use = "refocusing"
             scale_gz = self.params.refocusingScaleSliceGrad
-        bandwidth = 1.92 / duration  # for gauss pulse tbw = 1.92 -> specific to external pulse
+            rf = rfpf.RF.load(self.params.extRfRef)
+            rf.resample_to_duration(self.params.refocusingDuration)
+            rf.phase += phase_rad
         N = int(duration / self.system.rf_raster_time)
-        pulse_shape = load_external_rf(self.params.useExtRf)
         # interpolate shape to duration raster
-        shape_to_duration = np.interp(
-            np.linspace(0, pulse_shape.shape[0], N),
-            np.arange(pulse_shape.shape[0]),
-            pulse_shape
+        amp_shape_to_duration = np.interp(
+            np.linspace(0, rf.num_samples, N),
+            np.arange(rf.num_samples),
+            rf.amplitude
         )
+        phase_shape_to_duration = np.interp(
+            np.linspace(0, rf.num_samples, N),
+            np.arange(rf.num_samples),
+            rf.phase
+        )
+        # build pulse
         rf, slice_grad = pp.make_arbitrary_rf(
-            signal=shape_to_duration, flip_angle=flip_angle_rad, phase_offset=phase_rad, bandwidth=bandwidth,
-            delay=delay, max_slew=self.system.max_slew, return_gz=True,
+            signal=amp_shape_to_duration, flip_angle=flip_angle_rad, phase_offset=phase_shape_to_duration,
+            bandwidth=rf.bandwidth_in_Hz, delay=delay, max_slew=self.system.max_slew, return_gz=True,
             slice_thickness=slice_thickness, system=self.system, use=use
         )
         slice_grad.amplitude *= scale_gz
         slice_grad_re = pp.make_trapezoid(
             channel="z",
             system=self.system,
-            area=-self.params.excitationRephaseMoment,
+            area=-self.params.excitationRephaseFactor,
         )
         return rf, slice_grad, slice_grad_re
 

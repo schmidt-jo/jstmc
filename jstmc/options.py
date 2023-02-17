@@ -64,7 +64,7 @@ class SequenceParameters(helpers.Serializable):
     excitationDuration: int = 2500  # [us]
     excitationTimeBwProd: float = 2.0
     excitationPreMoment: float = 0.0    # Hz/m
-    excitationRephaseMoment: float = 500.0  # Hz/m
+    excitationRephaseFactor: float = 1.08  # Correction factor for insufficient rephasing
 
     refocusingFA: List = dc.field(default_factory=lambda: [140.0])
     refocusingRfPhase: List = dc.field(default_factory=lambda: [140.0])  # °
@@ -77,7 +77,9 @@ class SequenceParameters(helpers.Serializable):
 
     sliceSpoilingMoment: float = 1500.0
     interleavedAcquisition: bool = True
-    useExtRf: str = ""
+    # interfacing with rfpf
+    extRfExc: str = ""
+    extRfRef: str = ""
 
     ESP: float = 7.6  # [ms] echo spacing
     ETL: int = 8  # echo train length
