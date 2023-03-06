@@ -23,10 +23,8 @@ def pretty_plot_et(seq: options.Sequence,
 
     # set time until which to plot (taking 1echo time more for nice plot)
     t_total = (seq.params.ETL + 2) * seq.params.ESP * 1000  # in us
-    # leave first x free
-    t_cum = 0
     # build x ax
-    x_arr = np.arange(-t_cum, int(t_total))
+    x_arr = np.arange(0, int(t_total))
     # init arrays
     arr_rf = np.zeros((2, len(x_arr)))  # [amplitude,phase]
     arr_g = np.zeros((3, len(x_arr)))  # [gx, gy, gz]
@@ -55,6 +53,7 @@ def pretty_plot_et(seq: options.Sequence,
 
     # find starting idx
     start_idx = 0
+    t_cum = 0
     for block_idx in range(len(seq.ppSeq.block_durations)):
         t_cum += 1e6 * seq.ppSeq.block_durations[block_idx]
         if t_cum > t_start:
@@ -63,7 +62,9 @@ def pretty_plot_et(seq: options.Sequence,
             # check if we found excitation pulse, ie. start of echo train
             if getattr(block, "rf") is not None:
                 if block.rf.use == "excitation":
+                    x_arr -= int((block.rf.delay + block.rf.shape_dur / 2) * 1e6)
                     break
+    t_start = t_cum
     t_cum = 0
     for block_idx in np.arange(start_idx, len(seq.ppSeq.block_durations)):
         t0 = t_cum
@@ -75,12 +76,18 @@ def pretty_plot_et(seq: options.Sequence,
             rf = block.rf
             delay = int(1e6 * rf.delay)
             start = t0 + delay
-            end = t0 + delay + len(rf.signal)
-            arr_rf[0, start:end] = np.abs(rf.signal)
-            arr_rf[1, start:end] = np.angle(
-                rf.signal * np.exp(1j * rf.phase_offset) * np.exp(1j * 2 * np.pi * rf.t * rf.freq_offset))
-            if block_end < end:
-                block_end = end
+            end = t0 + delay + int(rf.shape_dur * 1e6)
+            signal = np.interp(x=np.arange(int(rf.shape_dur * 1e6)),
+                               xp=np.linspace(0, int(rf.shape_dur * 1e6), rf.signal.shape[0]),
+                               fp=np.abs(rf.signal))
+            angle = np.angle(
+                rf.signal * np.exp(1j * rf.phase_offset) * np.exp(1j * 2 * np.pi * rf.t * rf.freq_offset)
+            )
+            angle = np.interp(x=np.arange(int(rf.shape_dur * 1e6)),
+                               xp=np.linspace(0, int(rf.shape_dur * 1e6), rf.signal.shape[0]),
+                               fp=angle)
+            arr_rf[0, start:end] = signal
+            arr_rf[1, start:end] = angle
 
         grad_channels = ['gx', 'gy', 'gz']
         for x in range(len(grad_channels)):
@@ -97,9 +104,7 @@ def pretty_plot_et(seq: options.Sequence,
                     start = end
                     end = start + int(1e6 * grad.fall_time)
                     arr_g[x, start:end] = np.linspace(amp_value, 0, num=end - start)
-                    if block_end < end:
-                        block_end = end
-                if grad.type == 'grad':
+                elif grad.type == 'grad':
                     start = int(t0 + 1e6 * grad.delay)
                     end = int(start + 1e6 * grad.shape_dur)
                     wf = np.zeros(end - start)
@@ -110,15 +115,16 @@ def pretty_plot_et(seq: options.Sequence,
                         val_end = 1e3 * grad.waveform[idx_t+1] / seq.specs.gamma
                         wf[idx_start:idx_end] = np.linspace(val_start, val_end, idx_end - idx_start)
                     arr_g[x, start:end] = wf
+                else:
+                    end = 0
         # %%
         if getattr(block, 'adc') is not None:
             adc = block.adc
             start = int(t0 + 1e6*adc.delay)
             end = start + int(adc.num_samples * adc.dwell * 1e6)
             arr_adc[start:end] = 1
-            if block_end < end:
-                block_end = end
-        t_cum = block_end
+
+        t_cum += int(1e6 * getattr(block, 'block_duration'))
 
     plt.style.use('ggplot')
     fig = plt.figure(figsize=figsize, dpi=100)
@@ -214,7 +220,6 @@ def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
 
 
 def plot_slice_acquisition(z: np.ndarray, thickness: float):
-    z *= 1e3
     logging.info(f"plot slice acquisition scheme")
     plt.style.use("ggplot")
     fig = plt.figure()

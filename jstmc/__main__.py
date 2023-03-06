@@ -15,13 +15,13 @@ def main():
     seq = options.Sequence.from_cmd_args(prog_args)
     seq.check_output_path()
 
-    sbe = sequence.SequenceBlockEvents(seq=seq)
-    sbe.build()
-    emc_info = sbe.get_emc_info()
-    z = sbe.get_z()
-    sampling_pattern = sbe.get_sampling_pattern()
-    pulse = sbe.get_pulse_amplitudes()
-    seq = sbe.get_seq()
+    jstmc_algo = sequence.JsTmcSequence(seq_opts=seq)
+    jstmc_algo.build()
+    emc_info = jstmc_algo.get_emc_info()
+    z = jstmc_algo.get_z()
+    sampling_pattern = jstmc_algo.get_sampling_pattern()
+    pulse = jstmc_algo.get_pulse_amplitudes()
+    seq = jstmc_algo.get_seq()
     seq.write_sampling_pattern(sampling_pattern=sampling_pattern)
 
     scan_time = np.sum(seq.ppSeq.block_durations)
@@ -47,7 +47,8 @@ def main():
 
     if seq.config.visualize:
         logging.info("Plotting")
-        utils.plot_slice_acquisition(z, seq.params.resolutionSliceThickness*1e-3)
+        # give z and slice thickness both with same units. here mm
+        utils.plot_slice_acquisition(z*1e3, seq.params.resolutionSliceThickness)
         utils.plot_sampling_pattern(sampling_pattern, seq_vars=seq)
         path = Path("test/images").absolute()
 

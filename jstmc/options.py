@@ -49,21 +49,21 @@ class SequenceParameters(helpers.Serializable):
     """
     Holding all Sequence Parameters
     """
-    resolutionFovRead: float = 225  # [mm]
+    resolutionFovRead: float = 28  # [mm]
     resolutionFovPhase: float = 100.0  # [%]
-    resolutionBase: int = 346
-    resolutionSliceThickness: float = 0.65  # [mm]
-    resolutionNumSlices: int = 55
+    resolutionBase: int = 40
+    resolutionSliceThickness: float = 0.7  # [mm]
+    resolutionNumSlices: int = 10
     resolutionSliceGap: int = 0  # %
 
-    numberOfCentralLines: int = 40
-    accelerationFactor: float = 5.0
+    numberOfCentralLines: int = 20
+    accelerationFactor: float = 4.0
 
     excitationFA: float = 90.0
     excitationRfPhase: float = 90.0  # °
     excitationDuration: int = 2500  # [us]
     excitationTimeBwProd: float = 2.0
-    excitationPreMoment: float = 0.0    # Hz/m
+    excitationPreMoment: float = 0.0    # sHz/m
     excitationRephaseFactor: float = 1.08  # Correction factor for insufficient rephasing
 
     refocusingFA: List = dc.field(default_factory=lambda: [140.0])
