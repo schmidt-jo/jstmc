@@ -126,8 +126,20 @@ class RF(Event):
     def get_duration(self):
         return self.t_delay_s + self.t_duration_s + self.t_ringdown_s
 
-    def set_on_raster(self, value):
-        return np.ceil(value / self.system.rf_raster_time) * self.system.rf_raster_time
+    def set_on_raster(self, input_value: typing.Union[int, float, np.ndarray]):
+        is_single = isinstance(input_value, (int, float))
+        if is_single:
+            us_value = np.array(input_value) * 1e6
+        else:
+            us_value = 1e6 * input_value
+        us_raster = 1e6 * self.system.rf_raster_time
+        choice = us_value % us_raster
+        us_value[choice < 1e-4] = us_value[choice < 1e-4]
+        us_value[choice > 1e-4] = np.round(us_value / us_raster) * us_raster
+        if is_single:
+            return 1e-6 * us_value[0]
+        else:
+            return 1e-6 * us_value
 
     def to_simple_ns(self):
         return types.SimpleNamespace(
@@ -165,8 +177,11 @@ class GRAD(Event):
         self.max_slew: float = self.system.max_slew
         self.max_grad: float = self.system.max_grad
 
-    def set_on_raster(self, value: float, return_delay: bool = False):
+    def set_on_raster(self, value: float, return_delay: bool = False, double: bool = True):
         raster_time = float(self.system.grad_raster_time)
+        if double:
+            # helps with maintaining raster when calculating esp
+            raster_time *= 2.0
         if np.abs(value) % raster_time < 1e-9:
             rastered_value = value
         else:
@@ -650,10 +665,32 @@ class DELAY(Event):
         self.system = pp.Opts()
 
     @classmethod
-    def make_delay(cls, delay: float):
+    def make_delay(cls, delay: float, system: pp.Opts = pp.Opts()):
         delay_instance = cls()
+        delay_instance.system = system
         delay_instance.t_duration_s = delay
         return delay_instance
+
+    def check_on_block_raster(self) -> bool:
+        us_raster = 1e6 * self.system.grad_raster_time
+        us_value = 1e6 * self.t_duration_s
+        if us_value % us_raster < 1e-4:
+            rastered_value = us_value * 1e-6
+        else:
+            rastered_value = np.round(us_value / us_raster) * us_raster
+        if np.abs(rastered_value - self.t_duration_s) > 1e-8:
+            return False
+        else:
+            return True
+
+    def set_on_block_raster(self):
+        us_raster = 1e6 * self.system.grad_raster_time
+        us_value = 1e6 * self.t_duration_s
+        if us_value % us_raster < 1e-4:
+            rastered_value = us_value * 1e-6
+        else:
+            rastered_value = np.round(us_value / us_raster) * us_raster * 1e-6
+        return rastered_value
 
     def get_duration(self):
         return self.t_duration_s
