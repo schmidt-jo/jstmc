@@ -44,7 +44,7 @@ class EventBlock:
         return np.max([t.get_duration() for t in self.list_events()])
 
     @classmethod
-    def build_excitation(cls, params: options.SequenceParameters, system: pp.Opts):
+    def build_excitation(cls, params: options.SequenceParameters, system: pp.Opts, adjust_ramp_area: float = None):
         # Excitation
         logModule.info("setup excitation")
         # build read gradient prephasing to get minimum timing for spoiler / re of excitation
@@ -87,6 +87,7 @@ class EventBlock:
             re_spoil_moment=-params.sliceSpoilingMoment,
             rephase=1.0,
             t_minimum_re_grad=grad_a_read_pre_min_time,
+            adjust_ramp_area=adjust_ramp_area
         )
         # adjust start of rf
         rf.t_delay_s = grad_a_ss_delay
@@ -310,42 +311,20 @@ class JsTmcSequence:
 
         # timing
         self.esp: float = 0.0
-        self.delay_exci_ref1: float = 0.0
-        self.delay_ref_adc: float = 0.0
+        self.delay_exci_ref1: events.DELAY = events.DELAY()
+        self.delay_ref_adc: events.DELAY = events.DELAY()
         self.phase_enc_time: float = 0.0
-        self.delay_slice: float = 0.0
+        self.delay_slice: events.DELAY = events.DELAY()
 
         # sbbs
-        self.block_excitation: EventBlock = EventBlock.build_excitation(params=self.params, system=self.system)
         self.block_refocus_1: EventBlock = EventBlock.build_refocus(params=self.params, system=self.system, pulse_num=0)
+        ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[1] / 2.0
+        self.block_excitation: EventBlock = EventBlock.build_excitation(params=self.params, system=self.system, adjust_ramp_area=ramp_area_ref_1)
         self.block_acquisition: EventBlock = EventBlock.build_acquisition(params=self.params, system=self.system)
         self.block_refocus, self.phase_enc_time = EventBlock.build_refocus(
             params=self.params, system=self.system, pulse_num=1, return_pe_time=True
         )
         self.block_spoil_end: EventBlock = EventBlock.build_spoiler_end(params=self.params, system=self.system)
-        # specific to this sequence build:
-        # we added excitation rephasing and refocus symmetrical spoiling in the excitation block,
-        # due to timing optimization. Additional care needs to be taken to adjust for the
-        # unaccounted ramp up area of first refocuser. its dependencies are only given after all are initiated.
-        # Hence we do it here additionally
-        self._adjust_excitation_ramp_gradient()
-
-    def _adjust_excitation_ramp_gradient(self):
-        excitation_slice_grad = self.block_excitation.grad_slice
-        ramp_area_first_ref = self.block_refocus_1.grad_slice.amplitude[1] * \
-                              self.block_refocus_1.grad_slice.t_array_s[1] * 0.5
-        grad_adjusted, _, _ = events.GRAD.make_slice_selective(
-            pulse_bandwidth_hz=-self.block_excitation.rf.bandwidth_hz,
-            slice_thickness_m=self.params.resolutionSliceThickness * 1e-3,
-            duration_s=self.params.excitationDuration * 1e-6,
-            system=self.system,
-            pre_moment=-self.params.excitationPreMoment,
-            re_spoil_moment=-self.params.sliceSpoilingMoment,
-            rephase=1.0,
-            t_minimum_re_grad=excitation_slice_grad.t_array_s[-1] - excitation_slice_grad.t_array_s[-2],
-            adjust_ramp_area=ramp_area_first_ref
-        )
-        self.block_excitation.grad_slice = grad_adjusted
 
     def calculate_min_esp(self):
         # calculate time between midpoints
@@ -364,9 +343,15 @@ class JsTmcSequence:
         t_half_esp = self.params.ESP * 1e-3 / 2
         # add delays
         if t_exci_ref < t_half_esp:
-            self.delay_exci_ref1 += t_half_esp - t_exci_ref
+            self.delay_exci_ref1 = events.DELAY.make_delay(t_half_esp - t_exci_ref, system=self.system)
+            if not self.delay_exci_ref1.check_on_block_raster():
+                err = f"exci ref delay not on block raster"
+                logModule.error(err)
         if t_ref_1_adc < t_half_esp:
-            self.delay_ref_adc += t_half_esp - t_ref_1_adc
+            self.delay_ref_adc = events.DELAY.make_delay(t_half_esp - t_ref_1_adc, system=self.system)
+            if not self.delay_ref_adc.check_on_block_raster():
+                err = f"adc ref delay not on block raster"
+                logModule.error(err)
 
     def _calculate_slice_delay(self):
         # time per echo train
@@ -383,8 +368,13 @@ class JsTmcSequence:
         if self.params.resolutionNumSlices > max_num_slices:
             logModule.info(f"increase TR or Concatenation needed")
 
-        self.delay_slice = self.params.TR * 1e-3 / self.params.resolutionNumSlices - t_total_etl
-        logModule.info(f"\t\t-time between slices: {self.delay_slice*1e3:.2f} ms")
+        self.delay_slice = events.DELAY.make_delay(
+            self.params.TR * 1e-3 / self.params.resolutionNumSlices - t_total_etl, system=self.system
+        )
+        logModule.info(f"\t\t-time between slices: {self.delay_slice.get_duration()*1e3:.2f} ms")
+        if not self.delay_slice.check_on_block_raster():
+            self.delay_slice.set_on_block_raster()
+            logModule.info(f"adjusting TR delay to raster time: {self.delay_slice.get_duration()*1e3:.2f} ms")
 
     def _calculate_scan_time(self):
         t_total = self.params.TR * 1e-3 * (self.params.numberOfCentralLines + self.params.numberOfOuterLines)
@@ -426,8 +416,8 @@ class JsTmcSequence:
                 self.seq.ppSeq.add_block(*self.block_excitation.list_events_to_ns())
 
                 # delay if necessary
-                if self.delay_exci_ref1 > 1e-7:
-                    self.seq.ppSeq.add_block(events.DELAY.make_delay(self.delay_exci_ref1).to_simple_ns())
+                if self.delay_exci_ref1.get_duration() > 1e-7:
+                    self.seq.ppSeq.add_block(self.delay_exci_ref1.to_simple_ns())
 
                 # first refocus
                 self._set_fa(echo_idx=0)
@@ -436,16 +426,16 @@ class JsTmcSequence:
                 self.seq.ppSeq.add_block(*self.block_refocus_1.list_events_to_ns())
 
                 # delay if necessary
-                if self.delay_ref_adc > 1e-7:
-                    self.seq.ppSeq.add_block(events.DELAY.make_delay(self.delay_ref_adc).to_simple_ns())
+                if self.delay_ref_adc.get_duration() > 1e-7:
+                    self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
 
                 # adc
                 self.seq.ppSeq.add_block(*self.block_acquisition.list_events_to_ns())
                 # write sampling pattern
                 self._write_sampling_pattern(phase_idx=idx_n, echo_idx=0, slice_idx=idx_slice)
                 # delay if necessary
-                if self.delay_ref_adc > 1e-7:
-                    self.seq.ppSeq.add_block(events.DELAY.make_delay(self.delay_ref_adc).to_simple_ns())
+                if self.delay_ref_adc.get_duration() > 1e-7:
+                    self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
 
                 # loop
                 for echo_idx in np.arange(1, self.params.ETL):
@@ -458,8 +448,8 @@ class JsTmcSequence:
                     # add block
                     self.seq.ppSeq.add_block(*self.block_refocus.list_events_to_ns())
                     # delay if necessary
-                    if self.delay_ref_adc > 1e-7:
-                        self.seq.ppSeq.add_block(events.DELAY.make_delay(self.delay_ref_adc).to_simple_ns())
+                    if self.delay_ref_adc.get_duration() > 1e-7:
+                        self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
 
                     # adc
                     self.seq.ppSeq.add_block(*self.block_acquisition.list_events_to_ns())
@@ -467,12 +457,12 @@ class JsTmcSequence:
                     self._write_sampling_pattern(echo_idx=echo_idx, phase_idx=idx_n, slice_idx=idx_slice)
 
                     # delay if necessary
-                    if self.delay_ref_adc > 1e-7:
-                        self.seq.ppSeq.add_block(events.DELAY.make_delay(self.delay_ref_adc).to_simple_ns())
+                    if self.delay_ref_adc.get_duration() > 1e-7:
+                        self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
                 # spoil end
                 self.seq.ppSeq.add_block(*self.block_spoil_end.list_events_to_ns())
                 # insert TR
-                self.seq.ppSeq.add_block(events.DELAY.make_delay(self.delay_slice).to_simple_ns())
+                self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
         logModule.info(f"sequence built!")
 
     def _set_fa(self, echo_idx: int):
