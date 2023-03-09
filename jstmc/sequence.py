@@ -517,31 +517,34 @@ class JsTmcSequence:
             self.trueSliceNum[idx_slice_num] = z_pos
 
     def _set_k_space(self):
-        # calculate center of k space and indexes for full sampling band
-        k_central_phase = round(self.params.resolutionNPhase / 2)
-        k_half_central_lines = round(self.params.numberOfCentralLines / 2)
-        # set indexes for start and end of full k space center sampling
-        k_start = k_central_phase - k_half_central_lines
-        k_end = k_central_phase + k_half_central_lines
+        if self.params.accelerationFactor > 1.1:
+            # calculate center of k space and indexes for full sampling band
+            k_central_phase = round(self.params.resolutionNPhase / 2)
+            k_half_central_lines = round(self.params.numberOfCentralLines / 2)
+            # set indexes for start and end of full k space center sampling
+            k_start = k_central_phase - k_half_central_lines
+            k_end = k_central_phase + k_half_central_lines
 
-        # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
-        # Trying random sampling, ie. pick random line numbers for remaining indices,
-        # we dont want to pick the same positive as negative phase encodes to account for conjugate symmetry in k-space.
-        # Hence, we pick from the positive indexes twice (thinking of the center as 0) without allowing for duplexes
-        # and negate half the picks
-        # calculate indexes
-        k_remaining = np.arange(0, k_start)
-        # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
-        for idx_echo in range(self.params.ETL):
-            # same encode for all echoes -> central lines
-            self.k_indexes[idx_echo, :self.params.numberOfCentralLines] = np.arange(k_start, k_end)
-            # random encodes for different echoes
-            k_indices = np.random.choice(
-                k_remaining,
-                size=self.params.numberOfOuterLines,
-                replace=False)
-            k_indices[::2] = self.params.resolutionNPhase - 1 - k_indices[::2]
-            self.k_indexes[idx_echo, self.params.numberOfCentralLines:] = np.sort(k_indices)
+            # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
+            # Trying random sampling, ie. pick random line numbers for remaining indices,
+            # we dont want to pick the same positive as negative phase encodes to account for conjugate symmetry in k-space.
+            # Hence, we pick from the positive indexes twice (thinking of the center as 0) without allowing for duplexes
+            # and negate half the picks
+            # calculate indexes
+            k_remaining = np.arange(0, k_start)
+            # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
+            for idx_echo in range(self.params.ETL):
+                # same encode for all echoes -> central lines
+                self.k_indexes[idx_echo, :self.params.numberOfCentralLines] = np.arange(k_start, k_end)
+                # random encodes for different echoes
+                k_indices = np.random.choice(
+                    k_remaining,
+                    size=self.params.numberOfOuterLines,
+                    replace=False)
+                k_indices[::2] = self.params.resolutionNPhase - 1 - k_indices[::2]
+                self.k_indexes[idx_echo, self.params.numberOfCentralLines:] = np.sort(k_indices)
+        else:
+            self.k_indexes[:, :] = np.arange(self.params.numberOfCentralLines + self.params.numberOfOuterLines)
 
     def get_pypulseq_seq(self):
         return self.seq.ppSeq

@@ -1,4 +1,5 @@
 from jstmc import options, sequence, sar, utils
+from rf_pulse_files.rfpf import RF
 import numpy as np
 import logging
 from pathlib import Path

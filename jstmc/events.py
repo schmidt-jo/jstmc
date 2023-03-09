@@ -135,7 +135,7 @@ class RF(Event):
         us_raster = 1e6 * self.system.rf_raster_time
         choice = us_value % us_raster
         us_value[choice < 1e-4] = us_value[choice < 1e-4]
-        us_value[choice > 1e-4] = np.round(us_value / us_raster) * us_raster
+        us_value[choice > 1e-4] = np.round(us_value[choice > 1e-4] / us_raster) * us_raster
         if is_single:
             return 1e-6 * us_value[0]
         else:
@@ -156,6 +156,16 @@ class RF(Event):
         for now assume middle, but can extend to max
         """
         return self.t_duration_s / 2
+
+    def plot(self):
+        fig = plt.figure()
+        ax = fig.add_subplot()
+        amplitude = np.abs(self.signal)
+        phase = np.angle(self.signal) + self.phase_rad
+        ax.plot(np.linspace(0, self.t_duration_s, self.signal.shape[0]), amplitude, label='amp')
+        ax.plot(np.linspace(0, self.t_duration_s, self.signal.shape[0]), phase, label='phase')
+        ax.legend()
+        plt.show()
 
 
 class GRAD(Event):
@@ -544,10 +554,10 @@ class DELAY(Event):
         us_raster = 1e6 * self.system.grad_raster_time
         us_value = 1e6 * self.t_duration_s
         if us_value % us_raster < 1e-4:
-            rastered_value = us_value * 1e-6
+            rastered_value = us_value
         else:
-            rastered_value = np.round(us_value / us_raster) * us_raster * 1e-6
-        return rastered_value
+            rastered_value = np.round(us_value / us_raster) * us_raster
+        self.t_duration_s = rastered_value * 1e-6
 
     def get_duration(self):
         return self.t_duration_s
