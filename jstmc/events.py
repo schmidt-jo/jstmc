@@ -44,6 +44,7 @@ class RF(Event):
         self.t_delay_s: float = 0.0
         self.t_ringdown_s: float = 0.0
         self.t_dead_time_s: float = 0.0
+        self.t_array_s: np.ndarray = np.zeros(0)
 
         self.bandwidth_hz: float = 0.0
         self.time_bandwidth: float = 0.0
@@ -54,19 +55,28 @@ class RF(Event):
     def load_from_rfpf(cls, fname: str, flip_angle_rad: float, phase_rad: float, system: pp.Opts,
                        duration_s: float = 2e-3, delay_s: float = 0.0, pulse_type: str = 'excitation'):
         rf_instance = cls()
+        rf_instance.system = system
         rf = rfpf.RF.load(fname)
         rf_instance.extRfFile = fname
         rf_instance.pulse_type = pulse_type
 
         # get signal envelope
         signal = rf.amplitude * np.exp(1j * rf.phase)
-        # calculate raster with assigned duration
-        delta_t = duration_s / rf.num_samples
+        # calculate raster with assigned duration, we set the signal to be rastered on rf raster of 1 us
+        delta_t = system.rf_raster_time
+        t_array_s = rf_instance.set_on_raster(np.arange(0, int(duration_s*1e6)) * 1e-6)
+        # interpolate signal to new time
+        signal_interp = np.interp(
+            t_array_s,
+            xp=np.linspace(0, duration_s, rf.num_samples),
+            fp=signal
+        )
+
         # normalise flip angle
-        flip = np.sum(np.abs(signal)) * delta_t * 2 * np.pi
+        flip = np.sum(np.abs(signal_interp)) * delta_t * 2 * np.pi
 
         # assign values
-        rf_instance.signal = signal * flip_angle_rad / flip
+        rf_instance.signal = signal_interp * flip_angle_rad / flip
         rf_instance.flip_angle_rad = flip_angle_rad
         rf_instance.flip_angle_deg = flip_angle_rad / np.pi * 180.0
 
@@ -76,15 +86,16 @@ class RF(Event):
         rf_instance.t_duration_s = duration_s
         rf_instance.time_bandwidth = rf.time_bandwidth
         rf_instance.bandwidth_hz = rf_instance.time_bandwidth / duration_s
+        rf_instance.t_array_s = t_array_s
 
-        rf_instance.system = system
         rf_instance.t_delay_s = delay_s
         rf_instance.t_ringdown_s = system.rf_ringdown_time
         rf_instance.t_dead_time_s = system.rf_dead_time
         return rf_instance
 
     @classmethod
-    def make_sinc_pulse(cls, flip_angle_rad: float, system: pp.Opts, phase_rad: float = 0.0, pulse_type: str = 'excitation',
+    def make_sinc_pulse(cls, flip_angle_rad: float, system: pp.Opts, phase_rad: float = 0.0,
+                        pulse_type: str = 'excitation',
                         delay_s: float = 0.0, duration_s: float = 2e-3,
                         freq_offset_hz: float = 0.0, phase_offset_rad: float = 0.0,
                         time_bw_prod: float = 2):
@@ -115,6 +126,7 @@ class RF(Event):
         rf_instance.t_duration_s = duration_s
         rf_instance.t_ringdown_s = system.rf_ringdown_time
         rf_instance.t_dead_time_s = system.rf_dead_time
+        rf_instance.t_array_s = rf_instance.set_on_raster(np.linspace(0, duration_s, rf_simple_ns.signal.shape[0]))
 
         rf_instance.bandwidth_hz = time_bw_prod / duration_s
         rf_instance.time_bandwidth = time_bw_prod
@@ -146,7 +158,7 @@ class RF(Event):
             use=self.pulse_type, dead_time=self.t_dead_time_s, delay=self.t_delay_s,
             freq_offset=self.freq_offset_hz, phase_offset=self.phase_offset_rad,
             ringdown_time=self.t_ringdown_s, shape_dur=self.t_duration_s,
-            signal=self.signal, t=self.set_on_raster(np.linspace(0, self.t_duration_s, self.signal.shape[0])),
+            signal=self.signal, t=self.t_array_s,
             type='rf'
         )
 
@@ -209,6 +221,13 @@ class GRAD(Event):
                        rise_time: float = 0.0):
         grad_instance = cls()
         grad_instance.system = system
+        # some timing checks
+        if flat_time > 1e-7:
+            flat_time = grad_instance.set_on_raster(flat_time, double=False)
+        if duration_s > 1e-7:
+            duration_s = grad_instance.set_on_raster(duration_s, double=False)
+        if rise_time > 1e-7:
+            rise_time = grad_instance.set_on_raster(rise_time, double=False)
 
         grad_simple_ns = pp.make_trapezoid(
             channel=channel,
@@ -509,7 +528,7 @@ class ADC(Event):
         adc_instance.num_samples = adc_ns.num_samples
         adc_instance.t_delay_s = adc_ns.delay
         adc_instance.t_dwell_s = adc_ns.dwell
-        adc_instance.t_duration_s = adc_ns.dwell*adc_ns.num_samples
+        adc_instance.t_duration_s = adc_ns.dwell * adc_ns.num_samples
         adc_instance.t_dead_time_s = adc_ns.dead_time
         adc_instance.freq_offset_hz = adc_ns.freq_offset
         adc_instance.phase_offset_rad = adc_ns.phase_offset
@@ -568,12 +587,12 @@ class DELAY(Event):
 
 if __name__ == '__main__':
     rf = pp.make_sinc_pulse(
-        np.pi/2,
+        np.pi / 2,
         system=pp.Opts(),
         use='excitation'
     )
     rf_new = RF.make_sinc_pulse(
-        flip_angle_rad=np.pi/2,
+        flip_angle_rad=np.pi / 2,
         pulse_type='excitation',
         system=pp.Opts()
     )
@@ -585,7 +604,7 @@ if __name__ == '__main__':
         amplitudes=np.array([0, 755857.8987, 755857.8987, 0]),
         times=np.array([0, 0.00011, 0.00189, 0.002])
     )
-    grad_new = GRAD.make_trapezoid('z', system=pp.Opts(), area=1/0.7*1e3, duration_s=2e-3)
+    grad_new = GRAD.make_trapezoid('z', system=pp.Opts(), area=1 / 0.7 * 1e3, duration_s=2e-3)
     grad_new_ns = grad_new.to_simple_ns()
     logModule.info("compare grad")
 
@@ -599,4 +618,3 @@ if __name__ == '__main__':
     delay_new = DELAY.make_delay(1e-3)
 
     logModule.info("compare delays")
-
