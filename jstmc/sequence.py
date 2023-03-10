@@ -1,3 +1,5 @@
+import matplotlib.pyplot as plt
+
 from jstmc import events, options
 import numpy as np
 import pypulseq as pp
@@ -48,11 +50,15 @@ class EventBlock:
         # Excitation
         logModule.info("setup excitation")
         # build read gradient prephasing to get minimum timing for spoiler / re of excitation
-        # read pre area
-        read_area = params.deltaK_read * params.resolutionNRead
+        # read pre area - calculate read gradient in order to be able to correct ramp area
+        acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime)
+        grad_read = events.GRAD.make_trapezoid(
+            channel=params.read_dir, system=system,
+            flat_area=params.deltaK_read * params.resolutionNRead, flat_time=acquisition_window
+        )
         grad_a_read_pre = events.GRAD.make_trapezoid(
             channel=params.read_dir,
-            area=7 / 10 * read_area,  # keep 1/5 as spoiling moment
+            area=7 / 10 * grad_read.area,  # keep 1/5 as spoiling moment
             system=system,
         )
         grad_a_read_pre_min_time = grad_a_read_pre.get_duration()
@@ -61,7 +67,7 @@ class EventBlock:
             logModule.info(f"rf -- loading rfpf from file: {params.extRfExc}")
             rf = events.RF.load_from_rfpf(
                 fname=params.extRfExc, flip_angle_rad=params.excitationRadFA, phase_rad=params.excitationRadRfPhase,
-                system=system, duration_s=params.excitationDuration*1e-6, pulse_type='excitation'
+                system=system, duration_s=params.excitationDuration * 1e-6, pulse_type='excitation'
             )
         else:
             logModule.info(f"rf -- build sync pulse")
@@ -97,18 +103,28 @@ class EventBlock:
             logModule.info(f"readjust read prephasing timing (got time to spare)")
             grad_a_read_pre = events.GRAD.make_trapezoid(
                 channel=params.read_dir,
-                area=7 / 10 * read_area,  # keep 1/5 as spoiling moment
+                area=7 / 10 * grad_read.area,  # keep 1/5 as spoiling moment
                 duration_s=grad_a_ss_re_time,  # given in [s] via options
                 system=system,
             )
         # adjust start of prephasing read
         grad_a_read_pre.t_delay_s = rf.t_delay_s + rf.t_duration_s
+        # sanity checks
+        if np.max([np.abs(a) for a in [*grad_a_ss.amplitude, *grad_a_read_pre.amplitude]]) > system.max_grad:
+            err = f"gradient amplitude exceeds maximum allowed"
+            logModule.error(err)
+            raise ValueError(err)
         return cls(rf=rf, grad_slice=grad_a_ss, grad_phase=grad_a_read_pre)
 
     @classmethod
     def build_refocus(cls, params: options.SequenceParameters, system: pp.Opts,
                       pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
-        read_area = params.deltaK_read * params.resolutionNRead
+        # calculate read gradient in order to use correct area (corrected for ramps
+        acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime)
+        grad_read = events.GRAD.make_trapezoid(
+            channel=params.read_dir, system=system,
+            flat_area=params.deltaK_read * params.resolutionNRead, flat_time=acquisition_window
+        )
         # block is first refocusing + spoiling + phase encode
         logModule.info(f"setup refocus {pulse_num + 1}")
         # set up longest phase encode
@@ -127,7 +143,7 @@ class EventBlock:
         # build read spoiler
         grad_c_read_spoil = events.GRAD.make_trapezoid(
             channel=params.read_dir,
-            area=1 / 5 * read_area,
+            area=1 / 5 * grad_read.area,
             system=system,
         )
         duration_read_spoil = set_on_grad_raster_time(
@@ -139,7 +155,7 @@ class EventBlock:
             logModule.info(f"rf -- loading rfpf from file {params.extRfRef}")
             rf = events.RF.load_from_rfpf(
                 fname=params.extRfRef, system=system,
-                duration_s=params.refocusingDuration*1e-6, flip_angle_rad=np.pi,
+                duration_s=params.refocusingDuration * 1e-6, flip_angle_rad=np.pi,
                 phase_rad=0.0, pulse_type='refocusing'
             )
         else:
@@ -184,13 +200,13 @@ class EventBlock:
                 duration_lobe=duration_phase_grad, duration_between=t_duration_between, reverse_second_lobe=True
             )
             grad_c_read_spoil = events.GRAD.sym_grad(
-                system=system, channel=params.read_dir, area_lobe=read_area / 5, duration_lobe=duration_read_spoil,
+                system=system, channel=params.read_dir, area_lobe=grad_read.area / 5, duration_lobe=duration_read_spoil,
                 duration_between=rf.t_duration_s
             )
         else:
             grad_c_read_spoil = events.GRAD.make_trapezoid(
                 channel=params.read_dir,
-                area=1 / 5 * read_area,  # keep 1/5 as spoiling moment
+                area=1 / 5 * grad_read.area,  # keep 1/5 as spoiling moment
                 duration_s=duration_read_spoil,  # given in [s] via options
                 system=system,
             )
@@ -219,10 +235,8 @@ class EventBlock:
     @classmethod
     def build_acquisition(cls, params: options.SequenceParameters, system: pp.Opts):
         # block : adc + read grad
-        acquisition_window = set_on_grad_raster_time(
-            time=params.acquisitionTime, system=system
-        )
         logModule.info("setup acquisition")
+        acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime)
         grad_e_read = events.GRAD.make_trapezoid(
             channel=params.read_dir,
             flat_area=params.deltaK_read * params.resolutionNRead,
@@ -245,12 +259,15 @@ class EventBlock:
 
     @classmethod
     def build_spoiler_end(cls, params: options.SequenceParameters, system: pp.Opts):
-        read_area = params.deltaK_read * params.resolutionNRead
+        grad_read = events.GRAD.make_trapezoid(
+            channel=params.read_dir, system=system,
+            flat_area=params.deltaK_read * params.resolutionNRead, flat_time=params.acquisitionTime
+        )
         phase_grad_areas = (- np.arange(params.resolutionNPhase) + params.resolutionNPhase / 2) * \
                            params.deltaK_phase
         grad_c_read_spoil = events.GRAD.make_trapezoid(
             channel=params.read_dir,
-            area=1 / 5 * read_area,  # keep 1/5 as spoiling moment
+            area=1 / 5 * grad_read.area,  # keep 1/5 as spoiling moment
             system=system
         )
         grad_phase = events.GRAD.make_trapezoid(
@@ -269,7 +286,7 @@ class EventBlock:
         # set longest for all
         grad_c_read_spoil = events.GRAD.make_trapezoid(
             channel=params.read_dir,
-            area=1 / 5 * read_area,  # keep 1/5 as spoiling moment
+            area=1 / 5 * grad_read.area,  # keep 1/5 as spoiling moment
             system=system,
             duration_s=duration
         )
@@ -286,6 +303,32 @@ class EventBlock:
             duration_s=duration
         )
         return cls(system=system, grad_slice=grad_slice, grad_phase=grad_phase, grad_read=grad_c_read_spoil)
+
+    def plot(self):
+        # set axis
+        x_arr = np.arange(int(self.get_duration() * 1e6))
+        # rf
+        rf = np.zeros_like(x_arr)
+        start = int(self.rf.t_delay_s * 1e6)
+        end = int(1e6 * self.rf.get_duration()) - int(1e6 * self.rf.t_ringdown_s)
+        rf[start:end] = self.rf.signal
+
+        # grad slice
+        grad_ss = np.zeros_like(x_arr)
+        del_start = int(1e6*self.grad_slice.t_delay_s)
+        for t_idx in np.arange(1,self.grad_slice.t_array_s.shape[0]):
+            start = int(1e6 * self.grad_slice.t_array_s[t_idx - 1])
+            end = int(1e6 * self.grad_slice.t_array_s[t_idx])
+            grad_ss[del_start+start:del_start+end] = np.linspace(self.grad_slice.amplitude[t_idx-1], self.grad_slice.amplitude[t_idx], end - start)
+
+        fig = plt.figure()
+        ax_rf = fig.add_subplot(2, 1, 1)
+        ax_rf.plot(x_arr, np.abs(rf), label='rf abs')
+        ax_rf.plot(x_arr, np.angle(rf), label='rf phase')
+        ax_grad = ax_rf.twinx()
+        ax_grad.plot(x_arr, grad_ss, label='slice grad')
+        ax_grad.legend()
+        plt.show()
 
 
 class JsTmcSequence:
@@ -318,13 +361,18 @@ class JsTmcSequence:
 
         # sbbs
         self.block_refocus_1: EventBlock = EventBlock.build_refocus(params=self.params, system=self.system, pulse_num=0)
-        ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[1] / 2.0
-        self.block_excitation: EventBlock = EventBlock.build_excitation(params=self.params, system=self.system, adjust_ramp_area=ramp_area_ref_1)
+        ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[
+            1] / 2.0
+        self.block_excitation: EventBlock = EventBlock.build_excitation(params=self.params, system=self.system,
+                                                                        adjust_ramp_area=ramp_area_ref_1)
         self.block_acquisition: EventBlock = EventBlock.build_acquisition(params=self.params, system=self.system)
         self.block_refocus, self.phase_enc_time = EventBlock.build_refocus(
             params=self.params, system=self.system, pulse_num=1, return_pe_time=True
         )
         self.block_spoil_end: EventBlock = EventBlock.build_spoiler_end(params=self.params, system=self.system)
+        # self.block_excitation.plot()
+        # self.block_refocus_1.plot()
+        # self.block_refocus.plot()
 
     def calculate_min_esp(self):
         # calculate time between midpoints
@@ -356,13 +404,13 @@ class JsTmcSequence:
     def _calculate_slice_delay(self):
         # time per echo train
         t_pre_etl = self.block_excitation.rf.t_delay_s + self.block_excitation.rf.t_duration_s / 2
-        t_etl = self.params.ETL * self.params.ESP * 1e-3    # esp in ms
+        t_etl = self.params.ETL * self.params.ESP * 1e-3  # esp in ms
         t_post_etl = self.block_acquisition.get_duration() / 2 + self.phase_enc_time
 
         t_total_etl = t_pre_etl + t_etl + t_post_etl
 
         max_num_slices = int(np.floor(self.params.TR * 1e-3 / t_total_etl))
-        logModule.info(f"\t\t-total echo train length: {t_total_etl*1e3:.2f} ms")
+        logModule.info(f"\t\t-total echo train length: {t_total_etl * 1e3:.2f} ms")
         logModule.info(f"\t\t-desired number of slices: {self.params.resolutionNumSlices}")
         logModule.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
         if self.params.resolutionNumSlices > max_num_slices:
@@ -371,14 +419,14 @@ class JsTmcSequence:
         self.delay_slice = events.DELAY.make_delay(
             self.params.TR * 1e-3 / self.params.resolutionNumSlices - t_total_etl, system=self.system
         )
-        logModule.info(f"\t\t-time between slices: {self.delay_slice.get_duration()*1e3:.2f} ms")
+        logModule.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
         if not self.delay_slice.check_on_block_raster():
             self.delay_slice.set_on_block_raster()
-            logModule.info(f"adjusting TR delay to raster time: {self.delay_slice.get_duration()*1e3:.2f} ms")
+            logModule.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
 
     def _calculate_scan_time(self):
         t_total = self.params.TR * 1e-3 * (self.params.numberOfCentralLines + self.params.numberOfOuterLines)
-        logModule.info(f"\t\t-total scan time: {t_total/60:.1f} min ({t_total:.1f} s)")
+        logModule.info(f"\t\t-total scan time: {t_total / 60:.1f} min ({t_total:.1f} s)")
 
     def build(self):
         logModule.info(f"__Build Sequence__")
