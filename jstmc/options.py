@@ -70,7 +70,6 @@ class SequenceParameters(helpers.Serializable):
     refocusingRfPhase: List = dc.field(default_factory=lambda: [140.0])  # °
     refocusingDuration: int = 3000  # [us]
     refocusingTimeBwProd: float = 2.0
-    refocusingCrusherMoment: float = 2000.0
     refocusingScaleSliceGrad: float = 2/3   # adjust slice selective gradient sice of refocusing -
     # caution: this broadens the slice profile of the pulse, the further away from 180 fa
     # we possibly get saturation outside the slice
