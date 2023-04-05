@@ -100,6 +100,7 @@ class RF(Event):
                         freq_offset_hz: float = 0.0, phase_offset_rad: float = 0.0,
                         time_bw_prod: float = 2):
         rf_instance = cls()
+        rf_instance.system = system
         rf_simple_ns = pp.make_sinc_pulse(
             use=pulse_type,
             flip_angle=flip_angle_rad,

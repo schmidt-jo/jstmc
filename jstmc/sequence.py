@@ -660,7 +660,7 @@ class JsTmcSequence:
             "gradMode": "Normal",
             "excitationAngle": self.params.excitationRadFA / np.pi * 180.0,
             "excitationPhase": self.params.excitationRfPhase,
-            "gradientExcitation": self._set_grad_for_emc(self.block_excitation.grad_slice.amplitude[-5]),
+            "gradientExcitation": self._set_grad_for_emc(self.block_excitation.grad_slice.amplitude[-2]),
             "durationExcitation": self.params.excitationDuration,
             "gradientExcitationRephase": self._set_grad_for_emc(self.block_excitation.grad_slice.amplitude[-2]),
             "durationExcitationRephase": np.sum(np.diff(self.block_excitation.grad_slice.t_array_s[-4:])) * 1e6,
