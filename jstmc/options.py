@@ -1,7 +1,7 @@
 import logging
 
 import numpy as np
-from simple_parsing import ArgumentParser, helpers, field
+import simple_parsing as sp
 import dataclasses as dc
 from typing import List
 import pypulseq as pp
@@ -13,19 +13,21 @@ logModule = logging.getLogger(__name__)
 
 
 @dc.dataclass
-class SequenceConfig(helpers.Serializable):
-    configFile: str = field(default="", alias=["-c"])
-    outputPath: str = field(default="", alias=["-o"])
-    version: str = "1a"
-    report: bool = True
-    visualize: bool = field(default=True, alias=["-v"])
+class SequenceConfig(sp.helpers.Serializable):
+    configFile: str = sp.field(default="", alias=["-c"])
+    outputPath: str = sp.field(default="", alias=["-o"])
+    version: str = "3b"
+    report: bool = sp.field(default=False, alias=["-r"])
+    visualize: bool = sp.field(default=True, alias=["-v"])
 
 
 @dc.dataclass
-class ScannerSpecs(helpers.Serializable):
+class ScannerSpecs(sp.helpers.Serializable):
     """
     Holding all Scanning System Parameters
     """
+    # magnet
+    b_0: float = 6.98    # [T]
     # gradients
     max_grad: int = 40.0
     grad_unit: str = 'mT/m'
@@ -45,36 +47,36 @@ class ScannerSpecs(helpers.Serializable):
 
 
 @dc.dataclass
-class SequenceParameters(helpers.Serializable):
+class SequenceParameters(sp.helpers.Serializable):
     """
     Holding all Sequence Parameters
     """
-    resolutionFovRead: float = 28  # [mm]
+    resolutionFovRead: float = 100  # [mm]
     resolutionFovPhase: float = 100.0  # [%]
-    resolutionBase: int = 40
-    resolutionSliceThickness: float = 0.7  # [mm]
+    resolutionBase: int = 100
+    resolutionSliceThickness: float = 1.0  # [mm]
     resolutionNumSlices: int = 10
-    resolutionSliceGap: int = 0  # %
+    resolutionSliceGap: int = 20  # %
 
-    numberOfCentralLines: int = 20
-    accelerationFactor: float = 4.0
+    numberOfCentralLines: int = 40
+    accelerationFactor: float = 2.0
 
     excitationFA: float = 90.0
     excitationRfPhase: float = 90.0  # °
     excitationDuration: int = 2500  # [us]
     excitationTimeBwProd: float = 2.0
-    excitationPreMoment: float = 0.0    # sHz/m
-    excitationRephaseFactor: float = 1.08  # Correction factor for insufficient rephasing
+    excitationPreMoment: float = 1000.0    # Hz/m
+    excitationRephaseFactor: float = 1.04  # Correction factor for insufficient rephasing
 
     refocusingFA: List = dc.field(default_factory=lambda: [140.0])
-    refocusingRfPhase: List = dc.field(default_factory=lambda: [140.0])  # °
+    refocusingRfPhase: List = dc.field(default_factory=lambda: [0.0])  # °
     refocusingDuration: int = 3000  # [us]
     refocusingTimeBwProd: float = 2.0
     refocusingScaleSliceGrad: float = 2/3   # adjust slice selective gradient sice of refocusing -
     # caution: this broadens the slice profile of the pulse, the further away from 180 fa
     # we possibly get saturation outside the slice
 
-    sliceSpoilingMoment: float = 1500.0
+    sliceSpoilingMoment: float = 2500.0     # [Hz/m]
     interleavedAcquisition: bool = True
     # interfacing with rfpf
     extRfExc: str = ""
@@ -84,7 +86,7 @@ class SequenceParameters(helpers.Serializable):
     ETL: int = 8  # echo train length
     TR: float = 4500.0  # [ms]
 
-    bandwidth: float = 302.0  # [Hz / px]
+    bandwidth: float = 250.0  # [Hz / px]
     oversampling: float = 2.0   # oversampling factor
 
     phaseDir: str = "PA"
@@ -144,6 +146,12 @@ class SequenceParameters(helpers.Serializable):
             err = 'Unknown Phase direction: chose either PA or RL'
             logModule.error(err)
             raise AttributeError(err)
+
+        # error catches
+        if self.sliceSpoilingMoment < 1e-7:
+            err = f"this implementation needs a spoiling moment supplied: provide spoiling Moment > 0"
+            logModule.error(err)
+            raise ValueError(err)
 
     def get_voxel_size(self):
         logModule.info(
@@ -212,12 +220,13 @@ class Sequence:
         return Seq
 
     @classmethod
-    def from_cmd_args(cls, prog_args: ArgumentParser.parse_args):
+    def from_cmd_args(cls, prog_args: sp.ArgumentParser.parse_args):
         Seq = Sequence(specs=prog_args.specs, params=prog_args.params, config=prog_args.config)
         if prog_args.config.configFile:
             Seq = Seq.load(prog_args.config.configFile)
 
         system = pp.Opts(
+            B0=prog_args.specs.b_0,
             adc_dead_time=prog_args.specs.adc_dead_time,
             gamma=prog_args.specs.gamma,
             grad_raster_time=prog_args.specs.grad_raster_time,
@@ -346,7 +355,7 @@ def createCommandlineParser():
         Build the parser for arguments
         Parse the input arguments.
         """
-    parser = ArgumentParser(prog='jstmc')
+    parser = sp.ArgumentParser(prog='jstmc')
     parser.add_arguments(SequenceConfig, dest="config")
     parser.add_arguments(ScannerSpecs, dest="specs")
     parser.add_arguments(SequenceParameters, dest="params")
