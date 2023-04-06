@@ -53,7 +53,6 @@ def main():
         utils.plot_sampling_pattern(sampling_pattern, seq_vars=seq)
         path = Path("test/images").absolute()
 
-        utils.pretty_plot_et(seq, t_start=seq.params.TR)  # , save=path.joinpath("echo_train.png"))
         utils.pretty_plot_et(seq, t_start=1e3 * scan_time / 2 - 2 * seq.params.TR)  # , save=path.joinpath("echo_train.png"))
 
         seq.ppSeq.plot(time_range=(0, 2e-3 * seq.params.TR), time_disp='s')

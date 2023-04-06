@@ -209,6 +209,7 @@ def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
     y_pos = [int(n_phase/2)]
 
     fig = plt.figure(figsize=(10, 10))
+    fig.suptitle(f"sampling pattern")
     ax = fig.add_subplot()
     ax.grid(False)
     ax.set_xlabel("# echo - freq encode")
