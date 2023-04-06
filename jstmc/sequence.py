@@ -168,7 +168,7 @@ class EventBlock:
         if pulse_num > 0:
             # set symmetrical x / y
             # duration between - rather take middle part of slice select, rf duration on different raster possible
-            t_duration_between = grad_slice.set_on_raster(np.diff(grad_slice.t_array_s[3:5])[0])
+            t_duration_between = grad_slice.set_on_raster(grad_slice.slice_select_duration)
             grad_phase = events.GRAD.sym_grad(
                 system=system, channel=params.phase_dir, area_lobe=np.max(phase_grad_areas),
                 duration_lobe=duration_phase_grad, duration_between=t_duration_between, reverse_second_lobe=True
@@ -330,6 +330,9 @@ class EventBlock:
         max_grad = int(self.system.max_grad * 1.2e3 / 42577478.518)
 
         fig = plt.figure()
+        if self.rf.get_duration() > 1e-7:
+            # if we have an rf pulse we can title the plot by its use
+            fig.suptitle(f"gradient/pulse: {self.rf.pulse_type}")
         ax_rf = fig.add_subplot(2, 1, 1)
         ax_rf.plot(x_arr, rf_abs, label='rf abs', color=rf_color)
         ax_rf.fill_between(x_arr, rf_angle, label='rf phase', alpha=0.4, color=rf_color2)
@@ -660,7 +663,7 @@ class JsTmcSequence:
             "gradMode": "Normal",
             "excitationAngle": self.params.excitationRadFA / np.pi * 180.0,
             "excitationPhase": self.params.excitationRfPhase,
-            "gradientExcitation": self._set_grad_for_emc(self.block_excitation.grad_slice.amplitude[-5]),
+            "gradientExcitation": self._set_grad_for_emc(self.block_excitation.grad_slice.slice_select_amplitude),
             "durationExcitation": self.params.excitationDuration,
             "gradientExcitationRephase": self._set_grad_for_emc(self.block_excitation.grad_slice.amplitude[-2]),
             "durationExcitationRephase": np.sum(np.diff(self.block_excitation.grad_slice.t_array_s[-4:])) * 1e6,
@@ -670,7 +673,7 @@ class JsTmcSequence:
             "durationExcitationVerse2": 0.0,
             "refocusAngle": self.params.refocusingFA,
             "refocusPhase": self.params.refocusingRfPhase,
-            "gradientRefocus": self._set_grad_for_emc(self.block_refocus.grad_slice.amplitude[3]),
+            "gradientRefocus": self._set_grad_for_emc(self.block_refocus.grad_slice.slice_select_amplitude),
             "durationRefocus": self.params.refocusingDuration,
             "gradientCrush": self._set_grad_for_emc(self.block_refocus.grad_slice.amplitude[1]),
             "durationCrush": self.phase_enc_time * 1e6,
