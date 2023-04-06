@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pypulseq as pp
 
 import numpy as np
-from rf_pulse_files import rfpf
+import rf_pulse_files as rfpf
 import logging
 
 logModule = logging.getLogger(__name__)
@@ -100,6 +100,7 @@ class RF(Event):
                         freq_offset_hz: float = 0.0, phase_offset_rad: float = 0.0,
                         time_bw_prod: float = 2):
         rf_instance = cls()
+        rf_instance.system = system
         rf_simple_ns = pp.make_sinc_pulse(
             use=pulse_type,
             flip_angle=flip_angle_rad,
@@ -198,6 +199,10 @@ class GRAD(Event):
 
         self.max_slew: float = self.system.max_slew
         self.max_grad: float = self.system.max_grad
+
+        # needed in this project for referencing slice select extended gradients. easy hack
+        self.slice_select_amplitude: float = NotImplemented
+        self.slice_select_duration: float = NotImplemented
 
     def set_on_raster(self, value: float, return_delay: bool = False, double: bool = True):
         raster_time = float(self.system.grad_raster_time)
@@ -398,6 +403,8 @@ class GRAD(Event):
                     min_ramp_time = grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
                     duration_re_grad = np.max([ramp_time, min_ramp_time])
             t += duration_re_grad
+        else:
+            t += grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
         # ramp down
         amps.append(0.0)
         times.append(t)
@@ -419,6 +426,10 @@ class GRAD(Event):
         grad_instance.t_fall_time_s = times[-1] - times[-2]
         grad_instance.t_rise_time_s = times[1] - times[0]
         grad_instance.t_flat_time_s = 0.0
+
+        # for referencing slice selective part:
+        grad_instance.slice_select_duration = duration_s
+        grad_instance.slice_select_amplitude = amplitude
 
         grad_instance.system = system
 
