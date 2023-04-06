@@ -15,7 +15,7 @@ logModule = logging.getLogger(__name__)
 @dc.dataclass
 class SequenceConfig(sp.helpers.Serializable):
     configFile: str = sp.field(default="", alias=["-c"])
-    outputPath: str = sp.field(default="", alias=["-o"])
+    outputPath: str = sp.field(default="./test/", alias=["-o"])
     version: str = "3b"
     report: bool = sp.field(default=False, alias=["-r"])
     visualize: bool = sp.field(default=True, alias=["-v"])
