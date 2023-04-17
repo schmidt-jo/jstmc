@@ -286,7 +286,7 @@ class EventBlock:
         grad_read_color = '#ff5050'
         grad_phase_color = '#00802b'
         # set axis
-        x_arr = np.arange(int(self.get_duration() * 1e6))
+        x_arr = np.arange(int(np.round(self.get_duration() * 1e6)))
         # rf
         rf = np.zeros_like(x_arr, dtype=complex)
         start = int(self.rf.t_delay_s * 1e6)
