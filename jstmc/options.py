@@ -88,6 +88,8 @@ class SequenceParameters(sp.helpers.Serializable):
 
     bandwidth: float = 250.0  # [Hz / px]
     oversampling: float = 2.0   # oversampling factor
+    sampleWeighting: float = 0.0    # factor to weight random sampling towards central k-space ->
+    # towards 1 we get densely sampled center
 
     phaseDir: str = "PA"
 

@@ -632,14 +632,23 @@ class JsTmcSequence:
             # calculate indexes
             k_remaining = np.arange(0, k_start)
             # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
+            weighting_factor = np.clip(self.params.sampleWeighting, 0.01, 1)
+            if weighting_factor > 0.1:
+                logModule.info(f"\t\t-weighted random sampling of k-space phase encodes, factor: {weighting_factor}")
+            # random encodes for different echoes - random choice weighted towards center
+            weighting = np.clip(np.power(np.linspace(0, 1, k_start), weighting_factor), 1e-5, 1)
+            weighting /= np.sum(weighting)
             for idx_echo in range(self.params.ETL):
                 # same encode for all echoes -> central lines
                 self.k_indexes[idx_echo, :self.params.numberOfCentralLines] = np.arange(k_start, k_end)
-                # random encodes for different echoes
+
                 k_indices = np.random.choice(
                     k_remaining,
                     size=self.params.numberOfOuterLines,
-                    replace=False)
+                    replace=False,
+                    p=weighting
+
+                )
                 k_indices[::2] = self.params.resolutionNPhase - 1 - k_indices[::2]
                 self.k_indexes[idx_echo, self.params.numberOfCentralLines:] = np.sort(k_indices)
         else:
