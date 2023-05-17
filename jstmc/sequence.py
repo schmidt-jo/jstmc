@@ -210,7 +210,7 @@ class EventBlock:
     def build_acquisition(cls, params: options.SequenceParameters, system: pp.Opts):
         # block : adc + read grad
         logModule.info("setup acquisition")
-        acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime)
+        acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime + system.adc_dead_time)
         grad_read = events.GRAD.make_trapezoid(
             channel=params.read_dir,
             flat_area=params.deltaK_read * params.resolutionNRead,
@@ -252,7 +252,7 @@ class EventBlock:
         grad_slice = events.GRAD.make_trapezoid(
             channel='z',
             system=system,
-            area=params.sliceSpoilingMoment
+            area=params.sliceEndSpoilingMoment
         )
         duration = grad_phase.set_on_raster(
             np.max([grad_slice.get_duration(), grad_phase.get_duration(), grad_read_spoil.get_duration()])
@@ -260,7 +260,7 @@ class EventBlock:
         # set longest for all
         grad_read_spoil = events.GRAD.make_trapezoid(
             channel=params.read_dir,
-            area=-1 / 2 * grad_read.area,  # keep 1/5 as spoiling moment
+            area=-1 / 2 * grad_read.area,
             system=system,
             duration_s=duration
         )
@@ -273,7 +273,7 @@ class EventBlock:
         grad_slice = events.GRAD.make_trapezoid(
             channel='z',
             system=system,
-            area=-params.sliceSpoilingMoment,
+            area=-params.sliceEndSpoilingMoment,
             duration_s=duration
         )
         return cls(system=system, grad_slice=grad_slice, grad_phase=grad_phase, grad_read=grad_read_spoil)
@@ -412,7 +412,8 @@ class JsTmcSequence:
         ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[
             1] / 2.0
         self.block_excitation: EventBlock = EventBlock.build_excitation(params=self.params, system=self.system,
-                                                                        adjust_ramp_area=ramp_area_ref_1)
+                                                               adjust_ramp_area=ramp_area_ref_1)
+
         self.block_acquisition: EventBlock = EventBlock.build_acquisition(params=self.params, system=self.system)
         self.block_refocus, self.phase_enc_time = EventBlock.build_refocus(
             params=self.params, system=self.system, pulse_num=1, return_pe_time=True
@@ -505,6 +506,8 @@ class JsTmcSequence:
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             for idx_slice in range(self.params.resolutionNumSlices):
                 # looping through slices per phase encode
+                self._set_fa(echo_idx=0)
+                self._set_phase_grad(phase_idx=idx_n, echo_idx=0)
                 # apply slice offset
                 self._apply_slice_offset(idx_slice=idx_slice)
 
@@ -517,8 +520,6 @@ class JsTmcSequence:
                     self.seq.ppSeq.add_block(self.delay_exci_ref1.to_simple_ns())
 
                 # first refocus
-                self._set_fa(echo_idx=0)
-                self._set_phase_grad(phase_idx=idx_n, echo_idx=0)
                 # add block
                 self.seq.ppSeq.add_block(*self.block_refocus_1.list_events_to_ns())
 
@@ -557,6 +558,7 @@ class JsTmcSequence:
                     if self.delay_ref_adc.get_duration() > 1e-7:
                         self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
                 # spoil end
+                self._set_end_spoil_phase_grad()
                 self.seq.ppSeq.add_block(*self.block_spoil_end.list_events_to_ns())
                 # insert TR
                 self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
@@ -581,11 +583,29 @@ class JsTmcSequence:
             sbb = self.block_refocus
             last_idx_phase = self.k_indexes[echo_idx - 1, phase_idx]
             sbb.grad_phase.amplitude[1:3] = self.phase_areas[last_idx_phase] / self.phase_enc_time
-        if np.abs(self.phase_areas[idx_phase]) > 0:
+        if np.abs(self.phase_areas[idx_phase]) > 1:
             sbb.grad_phase.amplitude[-3:-1] = - self.phase_areas[idx_phase] / self.phase_enc_time
         else:
             sbb.grad_phase.amplitude = np.zeros_like(sbb.grad_phase.amplitude)
-        self.block_spoil_end.grad_phase.amplitude[1:3] = - sbb.grad_phase.amplitude[-3:-1]
+
+    def _set_end_spoil_phase_grad(self):
+        factor = np.array([0.5, 1.0, 0.5])
+
+        # get phase moment of last phase encode
+        pe_grad_amp = self.block_refocus.grad_phase.amplitude[-2]
+        pe_grad_times = self.block_refocus.grad_phase.t_array_s[-4:]
+        delta_times = np.diff(pe_grad_times)
+        area = np.sum(delta_times * pe_grad_amp * factor)
+
+        # adopt last grad to inverse area
+        pe_end_times = self.block_spoil_end.grad_phase.t_array_s[-4:]
+        delta_end_times = np.diff(pe_end_times)
+        pe_end_amp = area / np.sum(factor * delta_end_times)
+        if np.abs(pe_end_amp) > self.system.max_grad:
+            err = f"amplitude violation upon last pe grad setting"
+            logModule.error(err)
+            raise AttributeError(err)
+        self.block_spoil_end.grad_phase.amplitude[1:3] = - pe_end_amp
 
     def _apply_slice_offset(self, idx_slice: int):
         for sbb in [self.block_excitation, self.block_refocus_1, self.block_refocus]:
@@ -626,14 +646,15 @@ class JsTmcSequence:
 
             # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
             # Trying random sampling, ie. pick random line numbers for remaining indices,
-            # we dont want to pick the same positive as negative phase encodes to account for conjugate symmetry in k-space.
+            # we dont want to pick the same positive as negative phase encodes to account
+            # for conjugate symmetry in k-space.
             # Hence, we pick from the positive indexes twice (thinking of the center as 0) without allowing for duplexes
             # and negate half the picks
             # calculate indexes
             k_remaining = np.arange(0, k_start)
             # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
             weighting_factor = np.clip(self.params.sampleWeighting, 0.01, 1)
-            if weighting_factor > 0.1:
+            if weighting_factor > 0.05:
                 logModule.info(f"\t\t-weighted random sampling of k-space phase encodes, factor: {weighting_factor}")
             # random encodes for different echoes - random choice weighted towards center
             weighting = np.clip(np.power(np.linspace(0, 1, k_start), weighting_factor), 1e-5, 1)

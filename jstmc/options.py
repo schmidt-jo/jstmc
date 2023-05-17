@@ -77,6 +77,7 @@ class SequenceParameters(sp.helpers.Serializable):
     # we possibly get saturation outside the slice
 
     sliceSpoilingMoment: float = 2500.0     # [Hz/m]
+    sliceEndSpoilingMoment: float = 2500    # [Hz/m]
     interleavedAcquisition: bool = True
     # interfacing with rfpf
     extRfExc: str = ""
@@ -131,6 +132,8 @@ class SequenceParameters(sp.helpers.Serializable):
             # fill up list with last value
             self.refocusingFA.append(self.refocusingFA[-1])
             self.refocusingRfPhase.append(self.refocusingRfPhase[-1])
+        # while self.sliceSpoilingMoment.__len__() < self.ETL:
+        #     self.sliceSpoilingMoment.append(self.sliceSpoilingMoment[-1])
 
         # casting
         self.excitationRadFA = self.excitationFA / 180.0 * np.pi
@@ -150,7 +153,7 @@ class SequenceParameters(sp.helpers.Serializable):
             raise AttributeError(err)
 
         # error catches
-        if self.sliceSpoilingMoment < 1e-7:
+        if np.any(np.array(self.sliceSpoilingMoment) < 1e-7):
             err = f"this implementation needs a spoiling moment supplied: provide spoiling Moment > 0"
             logModule.error(err)
             raise ValueError(err)
