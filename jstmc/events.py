@@ -64,7 +64,7 @@ class RF(Event):
         signal = rf.amplitude * np.exp(1j * rf.phase)
         # calculate raster with assigned duration, we set the signal to be rastered on rf raster of 1 us
         delta_t = system.rf_raster_time
-        t_array_s = rf_instance.set_on_raster(np.arange(0, int(duration_s*1e6)) * 1e-6)
+        t_array_s = rf_instance.set_on_raster(np.arange(0, int(duration_s * 1e6)) * 1e-6)
         # interpolate signal to new time
         signal_interp = np.interp(
             t_array_s,
@@ -102,6 +102,49 @@ class RF(Event):
         rf_instance = cls()
         rf_instance.system = system
         rf_simple_ns = pp.make_sinc_pulse(
+            use=pulse_type,
+            flip_angle=flip_angle_rad,
+            delay=delay_s,
+            duration=duration_s,
+            freq_offset=freq_offset_hz,
+            phase_offset=phase_offset_rad + phase_rad,
+            return_gz=False,
+            time_bw_product=time_bw_prod,
+            system=system
+        )
+        rf_instance.flip_angle_deg = flip_angle_rad * 180.0 / np.pi
+        rf_instance.phase_deg = phase_offset_rad * 180.0 / np.pi
+        rf_instance.pulse_type = pulse_type
+        rf_instance.extRfFile = ""
+
+        rf_instance.flip_angle_rad = flip_angle_rad
+        rf_instance.phase_rad = phase_rad
+
+        rf_instance.freq_offset_hz = freq_offset_hz
+        rf_instance.phase_offset_rad = phase_offset_rad
+
+        rf_instance.t_delay_s = delay_s
+        rf_instance.t_duration_s = duration_s
+        rf_instance.t_ringdown_s = system.rf_ringdown_time
+        rf_instance.t_dead_time_s = system.rf_dead_time
+        rf_instance.t_array_s = rf_instance.set_on_raster(np.linspace(0, duration_s, rf_simple_ns.signal.shape[0]))
+
+        rf_instance.bandwidth_hz = time_bw_prod / duration_s
+        rf_instance.time_bandwidth = time_bw_prod
+
+        rf_instance.signal = rf_simple_ns.signal
+        rf_instance.system = system
+        return rf_instance
+
+    @classmethod
+    def make_gauss_pulse(cls, flip_angle_rad: float, system: pp.Opts, phase_rad: float = 0.0,
+                         pulse_type: str = 'excitation',
+                         delay_s: float = 0.0, duration_s: float = 2e-3,
+                         freq_offset_hz: float = 0.0, phase_offset_rad: float = 0.0,
+                         time_bw_prod: float = 2):
+        rf_instance = cls()
+        rf_instance.system = system
+        rf_simple_ns = pp.make_gauss_pulse(
             use=pulse_type,
             flip_angle=flip_angle_rad,
             delay=delay_s,
@@ -334,11 +377,11 @@ class GRAD(Event):
             # want to minimize timing of gradient - use max grad
             pre_grad_amplitude = np.sign(pre_moment) * system.max_grad
             duration_pre_grad = get_asym_grad_min_duration(max_amplitude=pre_grad_amplitude, moment=pre_moment)
-            pre_t_flat = grad_instance.set_on_raster(duration_pre_grad - 2 * t_ramp_unipolar)
             if duration_pre_grad < t_minimum_re_grad:
                 # stretch to minimum required time
                 duration_pre_grad = t_minimum_re_grad
                 pre_grad_amplitude = get_asym_grad_amplitude(duration=duration_pre_grad, moment=pre_moment)
+            pre_t_flat = grad_instance.set_on_raster(duration_pre_grad - 2 * t_ramp_unipolar)
             amps.extend([pre_grad_amplitude, pre_grad_amplitude, amplitude])
             times.extend([t_ramp_unipolar, t_ramp_unipolar + pre_t_flat, duration_pre_grad])
         else:

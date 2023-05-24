@@ -58,7 +58,7 @@ class EventBlock:
         else:
             logModule.info(f"rf -- build sync pulse")
             time_bw_prod = params.excitationTimeBwProd
-            rf = events.RF.make_sinc_pulse(
+            rf = events.RF.make_gauss_pulse(
                 flip_angle_rad=params.excitationRadFA,
                 phase_rad=params.excitationRadRfPhase,
                 pulse_type="excitation",
@@ -134,7 +134,7 @@ class EventBlock:
             )
         else:
             logModule.info(f"rf -- build sync pulse")
-            rf = events.RF.make_sinc_pulse(
+            rf = events.RF.make_gauss_pulse(
                 flip_angle_rad=params.refocusingRadFA[pulse_num],
                 phase_rad=params.refocusingRadRfPhase[pulse_num],
                 pulse_type="refocusing",
