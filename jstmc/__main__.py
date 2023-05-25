@@ -1,4 +1,4 @@
-from jstmc import options, sequence, sar, utils
+from jstmc import options, seq_v_jstmc, sar, utils
 from rf_pulse_files.rfpf import RF
 import numpy as np
 import logging
@@ -16,7 +16,7 @@ def main():
     seq = options.Sequence.from_cmd_args(prog_args)
     seq.check_output_path()
 
-    jstmc_algo = sequence.JsTmcSequence(seq_opts=seq)
+    jstmc_algo = seq_v_jstmc.JsTmcSequence(seq_opts=seq)
     jstmc_algo.build()
     emc_info = jstmc_algo.get_emc_info()
     z = jstmc_algo.get_z()
