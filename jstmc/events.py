@@ -11,6 +11,7 @@ import pypulseq as pp
 import numpy as np
 import rf_pulse_files as rfpf
 import logging
+import copy
 
 logModule = logging.getLogger(__name__)
 
@@ -25,6 +26,9 @@ class Event:
 
     def to_simple_ns(self):
         raise NotImplementedError
+
+    def copy(self):
+        return copy.copy(self)
 
 
 class RF(Event):
@@ -608,7 +612,8 @@ class GRAD(Event):
         amplitude_a = amps[1]
         amplitude_b = amps[3]
         delta_t = np.abs(np.diff(times))
-        area = amplitude_a * (delta_t[0] / 2 + delta_t[1] + delta_t[2] / 2) + amplitude_b * delta_t[2] / 2
+        factor = np.array([0.5, 1.0, 0.5])
+        area = amplitude_a * np.sum(factor * delta_t) + amplitude_b * delta_t[2] / 2
         return area
 
 

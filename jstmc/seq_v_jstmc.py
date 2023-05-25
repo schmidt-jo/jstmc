@@ -24,9 +24,9 @@ class JsTmcSequence(seq_gen.GenSequence):
                                                                                           pulse_num=0)
         ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[
             1] / 2.0
-        self.block_excitation: kernels.EventBlock = kernels.EventBlock.build_excitation(params=self.params,
-                                                                                        system=self.system,
-                                                                                        adjust_ramp_area=ramp_area_ref_1)
+        self.block_excitation: kernels.EventBlock = kernels.EventBlock.build_jstmc_excitation(params=self.params,
+                                                                                              system=self.system,
+                                                                                              adjust_ramp_area=ramp_area_ref_1)
 
         self.block_acquisition: kernels.EventBlock = kernels.EventBlock.build_jstmc_acquisition(params=self.params,
                                                                                                 system=self.system)

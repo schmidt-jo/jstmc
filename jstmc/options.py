@@ -29,9 +29,9 @@ class ScannerSpecs(sp.helpers.Serializable):
     # magnet
     b_0: float = 6.98    # [T]
     # gradients
-    max_grad: int = 40.0
+    max_grad: float = 40.0
     grad_unit: str = 'mT/m'
-    max_slew: int = 200.0
+    max_slew: float = 200.0
     slew_unit: str = 'T/m/s'
     rise_time: int = 0  # watch out, rise time != 0 gives max_slew = 0 in opts method
     grad_raster_time: float = 10e-6

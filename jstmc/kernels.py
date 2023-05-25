@@ -45,7 +45,7 @@ class EventBlock:
         return np.max([t.get_duration() for t in self.list_events()])
 
     @classmethod
-    def build_excitation(cls, params: options.SequenceParameters, system: pp.Opts, adjust_ramp_area: float = None):
+    def build_jstmc_excitation(cls, params: options.SequenceParameters, system: pp.Opts, adjust_ramp_area: float = None):
         # Excitation
         logModule.info("setup excitation")
         if params.extRfExc:
