@@ -345,6 +345,14 @@ class GRAD(Event):
         t_minimum_re_grad = grad_instance.set_on_raster(t_minimum_re_grad)
 
         # calculations
+        def get_area_asym_grad(amp_h: float, time_h: float, time_htol: float, time_0toh: float = t_ramp_unipolar,
+                               amp_l: float = amplitude) -> float:
+            """
+            we want to calculate the area / moment from an assymetric gradient part
+            """
+            area = 0.5 * time_0toh * amp_h + time_h * amp_h + 0.5 * (amp_h - amp_l) * time_htol + time_htol * amp_l
+            return area
+
         def get_asym_grad_amplitude(
                 duration: float, moment: float,
                 t_asym_ramp: float = t_ramp_unipolar, t_zero_ramp: float = t_ramp_unipolar,
@@ -357,14 +365,24 @@ class GRAD(Event):
 
         def get_asym_grad_min_duration(max_amplitude: float, moment: float,
                                        t_asym_ramp: float = t_ramp_unipolar, t_zero_ramp: float = t_ramp_unipolar,
-                                       asym_amplitude: float = amplitude) -> float:
+                                       asym_amplitude: float = amplitude) -> (float, float):
             """
             calculate the duration of the re/pre gradient given ramp times to 0 and slice select amplitude,
              respectively and a maximal re/pre gradient amplitude
             """
-            return grad_instance.set_on_raster(
+            t_min_duration = grad_instance.set_on_raster(
                 (moment - asym_amplitude * t_asym_ramp / 2) / max_amplitude + t_asym_ramp / 2 + t_zero_ramp / 2
             )
+            if np.abs(get_area_asym_grad(
+                    amp_h=max_amplitude, time_h=t_min_duration-t_asym_ramp-t_zero_ramp,
+                    time_htol=t_asym_ramp, time_0toh=t_zero_ramp, amp_l=asym_amplitude)) - np.abs(moment) > 0:
+                # absolute moment was increased, possibly due to np.ceil call in set raster time.
+                # apparent prolonging of timing, we can pull it back by slight decreasing of amplitude
+                max_amplitude = get_asym_grad_amplitude(
+                    duration=t_min_duration, moment=moment,
+                    t_asym_ramp=t_asym_ramp, t_zero_ramp=t_zero_ramp, asym_amplitude=asym_amplitude
+                )
+            return t_min_duration, max_amplitude
 
         # pre moment
         if np.abs(pre_moment) > 1e-7:
@@ -376,7 +394,7 @@ class GRAD(Event):
                 # we can adopt here also with doubling the ramp times in case we have opposite signs
             # want to minimize timing of gradient - use max grad
             pre_grad_amplitude = np.sign(pre_moment) * system.max_grad
-            duration_pre_grad = get_asym_grad_min_duration(max_amplitude=pre_grad_amplitude, moment=pre_moment)
+            duration_pre_grad, pre_grad_amplitude = get_asym_grad_min_duration(max_amplitude=pre_grad_amplitude, moment=pre_moment)
             if duration_pre_grad < t_minimum_re_grad:
                 # stretch to minimum required time
                 duration_pre_grad = t_minimum_re_grad
@@ -421,9 +439,10 @@ class GRAD(Event):
                 re_grad_amplitude = get_asym_grad_amplitude(
                     duration=duration_re_grad, moment=re_spoil_moment,
                     t_asym_ramp=t_ramp_asym)
+                # but if that exceeds grad limit we need to prolong the time
                 if np.abs(re_grad_amplitude) > system.max_grad:
                     re_grad_amplitude = np.sign(re_spoil_moment) * system.max_grad
-                    duration_re_grad = get_asym_grad_min_duration(
+                    duration_re_grad, re_grad_amplitude = get_asym_grad_min_duration(
                         max_amplitude=re_grad_amplitude, moment=re_spoil_moment, t_asym_ramp=t_ramp_asym)
                 re_t_flat = grad_instance.set_on_raster(duration_re_grad - t_ramp_unipolar - t_ramp_asym)
                 amps.extend([re_grad_amplitude, re_grad_amplitude])
@@ -431,7 +450,7 @@ class GRAD(Event):
             else:
                 # want to minimize timing of gradient - use max grad
                 re_grad_amplitude = np.sign(re_spoil_moment) * system.max_grad
-                duration_re_grad = get_asym_grad_min_duration(
+                duration_re_grad, re_grad_amplitude = get_asym_grad_min_duration(
                     max_amplitude=re_grad_amplitude, moment=re_spoil_moment, t_asym_ramp=t_ramp_asym
                 )
                 re_t_flat = grad_instance.set_on_raster(duration_re_grad - t_ramp_asym - t_ramp_unipolar)
