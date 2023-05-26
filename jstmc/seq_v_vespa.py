@@ -204,7 +204,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
                 self._add_us_acquisition(gre_sampling=True)
 
                 # successive double gre + mese in center
-                for echo_idx in np.arange(self.num_succ_echoes, self.params.ETL):
+                for echo_idx in np.arange(self.num_succ_echoes, self.params.ETL-1):
                     # refocus
                     self.seq.ppSeq.add_block(*self.block_refocus_gesse.list_events_to_ns())
                     # add gre sampling
