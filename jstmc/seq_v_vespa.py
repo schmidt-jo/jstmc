@@ -225,3 +225,4 @@ if __name__ == '__main__':
     te[1:] = seq_gv.te * 1e3
     print(te)
     print(np.diff(te))
+
