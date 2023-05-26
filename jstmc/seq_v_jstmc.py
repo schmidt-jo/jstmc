@@ -19,22 +19,22 @@ class JsTmcSequence(seq_gen.GenSequence):
         self.delay_slice: events.DELAY = events.DELAY()
 
         # sbbs
-        self.block_refocus_1: kernels.EventBlock = kernels.EventBlock.build_jstmc_refocus(params=self.params,
-                                                                                          system=self.system,
-                                                                                          pulse_num=0)
+        self.block_refocus_1: kernels.EventBlock = kernels.EventBlock.build_refocus(params=self.params,
+                                                                                    system=self.system,
+                                                                                    pulse_num=0)
         ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[
             1] / 2.0
-        self.block_excitation: kernels.EventBlock = kernels.EventBlock.build_jstmc_excitation(params=self.params,
-                                                                                              system=self.system,
-                                                                                              adjust_ramp_area=ramp_area_ref_1)
+        self.block_excitation: kernels.EventBlock = kernels.EventBlock.build_excitation(params=self.params,
+                                                                                        system=self.system,
+                                                                                        adjust_ramp_area=ramp_area_ref_1)
 
-        self.block_acquisition: kernels.EventBlock = kernels.EventBlock.build_jstmc_acquisition(params=self.params,
-                                                                                                system=self.system)
-        self.block_refocus, self.phase_enc_time = kernels.EventBlock.build_jstmc_refocus(
+        self.block_acquisition: kernels.EventBlock = kernels.EventBlock.build_fs_acquisition(params=self.params,
+                                                                                             system=self.system)
+        self.block_refocus, self.phase_enc_time = kernels.EventBlock.build_refocus(
             params=self.params, system=self.system, pulse_num=1, return_pe_time=True
         )
-        self.block_spoil_end: kernels.EventBlock = kernels.EventBlock.build_jstmc_spoiler_end(params=self.params,
-                                                                                              system=self.system)
+        self.block_spoil_end: kernels.EventBlock = kernels.EventBlock.build_spoiler_end(params=self.params,
+                                                                                        system=self.system)
         if self.seq.config.visualize:
             self.block_excitation.plot()
             self.block_refocus_1.plot()
