@@ -28,7 +28,7 @@ class Event:
         raise NotImplementedError
 
     def copy(self):
-        return copy.copy(self)
+        return copy.deepcopy(self)
 
 
 class RF(Event):
@@ -611,7 +611,7 @@ class GRAD(Event):
             times = times[::-1]
         amplitude_a = amps[1]
         amplitude_b = amps[3]
-        delta_t = np.abs(np.diff(times))
+        delta_t = np.abs(np.diff(times))[:3]
         factor = np.array([0.5, 1.0, 0.5])
         area = amplitude_a * np.sum(factor * delta_t) + amplitude_b * delta_t[2] / 2
         return area
@@ -658,7 +658,7 @@ class ADC(Event):
         return adc_instance
 
     def get_duration(self):
-        return self.t_duration_s
+        return self.t_duration_s + self.t_delay_s
 
     def to_simple_ns(self):
         return types.SimpleNamespace(
