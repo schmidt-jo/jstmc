@@ -1,9 +1,11 @@
-import matplotlib.pyplot as plt
+import copy
 
+import matplotlib.pyplot as plt
 from jstmc import events, options
 import numpy as np
 import pypulseq as pp
 import logging
+copy
 
 logModule = logging.getLogger(__name__)
 
@@ -34,6 +36,9 @@ class EventBlock:
 
         self.delay: events.DELAY = delay
 
+    def copy(self):
+        return copy.deepcopy(self)
+
     def list_events_to_ns(self):
         return [ev.to_simple_ns() for ev in self.list_events()]
 
@@ -45,9 +50,14 @@ class EventBlock:
         return np.max([t.get_duration() for t in self.list_events()])
 
     @classmethod
-    def build_jstmc_excitation(cls, params: options.SequenceParameters, system: pp.Opts, adjust_ramp_area: float = None):
+    def build_excitation(cls, params: options.SequenceParameters, system: pp.Opts,
+                         use_slice_spoiling: bool = True, adjust_ramp_area: float = 0.0):
         # Excitation
         logModule.info("setup excitation")
+        if use_slice_spoiling:
+            spoiling_moment = params.sliceSpoilingMoment
+        else:
+            spoiling_moment = 2e-7
         if params.extRfExc:
             logModule.info(f"rf -- loading rfpf from file: {params.extRfExc}")
             rf = events.RF.load_from_rfpf(
@@ -75,7 +85,7 @@ class EventBlock:
             duration_s=params.excitationDuration * 1e-6,
             system=system,
             pre_moment=-params.excitationPreMoment,
-            re_spoil_moment=-params.sliceSpoilingMoment,
+            re_spoil_moment=-spoiling_moment,
             rephase=params.excitationRephaseFactor,
             adjust_ramp_area=adjust_ramp_area
         )
@@ -90,8 +100,8 @@ class EventBlock:
         return cls(rf=rf, grad_slice=grad_slice)
 
     @classmethod
-    def build_jstmc_refocus(cls, params: options.SequenceParameters, system: pp.Opts,
-                            pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
+    def build_refocus(cls, params: options.SequenceParameters, system: pp.Opts,
+                      pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
         # calculate read gradient in order to use correct area (corrected for ramps
         acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime)
         grad_read = events.GRAD.make_trapezoid(
@@ -206,7 +216,7 @@ class EventBlock:
             return _instance
 
     @classmethod
-    def build_jstmc_acquisition(cls, params: options.SequenceParameters, system: pp.Opts):
+    def build_fs_acquisition(cls, params: options.SequenceParameters, system: pp.Opts):
         # block : adc + read grad
         logModule.info("setup acquisition")
         acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime + system.adc_dead_time)
@@ -231,7 +241,146 @@ class EventBlock:
         return cls(adc=adc, grad_read=grad_read)
 
     @classmethod
-    def build_jstmc_spoiler_end(cls, params: options.SequenceParameters, system: pp.Opts):
+    def build_pf_acquisition(cls, params: options.SequenceParameters, system: pp.Opts):
+        # block : adc + read grad
+        logModule.info("setup acquisition w undersampling partial fourier read")
+        pf_factor = 0.75
+        # we take 100 points in the center, the latter half of the rest is acquired with accelerated readout,
+        # the first half is omitted
+        # ToDo: make this a parameter in settings
+        logModule.info(f"partial fourier for 0th echo, factor: {pf_factor:.2f}")
+        num_acq_lines = int(pf_factor * params.resolutionNRead)
+        # set acquisition time on raster
+        acq_time_fs = set_on_grad_raster_time(
+            system=system, time=params.dwell * num_acq_lines
+        )
+        # we take the usual full sampling
+        grad_read_fs = events.GRAD.make_trapezoid(
+            channel=params.read_dir, system=system,
+            flat_area=params.deltaK_read * num_acq_lines, flat_time=acq_time_fs
+        )
+        area_ramp = grad_read_fs.amplitude[1] * grad_read_fs.t_array_s[1] * 0.5
+        area_pre_read = (1 - 0.5 / pf_factor) * grad_read_fs.flat_area + area_ramp
+
+        adc = events.ADC.make_adc(
+            system=system, num_samples=num_acq_lines, delay_s=grad_read_fs.t_array_s[1], dwell=params.dwell
+        )
+        acq_block = cls()
+        acq_block.grad_read = grad_read_fs
+        acq_block.adc = adc
+
+        t_middle = grad_read_fs.t_flat_time_s * (1 - pf_factor) + grad_read_fs.t_array_s[1]
+        acq_block.t_mid = t_middle
+        return acq_block, area_pre_read
+
+    @classmethod
+    def build_us_acquisition(cls, params: options.SequenceParameters, system: pp.Opts, invert_grad_dir: bool = False):
+        logModule.info("setup acquisition w undersampling")
+        # calculate maximum acc factor -> want to keep snr -> ie bandwidth ie. dwell equal and stretch read grad
+        grad_amp_fs = params.deltaK_read / params.dwell
+        acc_max = system.max_grad / grad_amp_fs
+        logModule.info(f"maximum acceleration factor: {acc_max}, rounding to lower int")
+        acc_max = int(np.floor(acc_max))
+        grad_amp_us = acc_max * grad_amp_fs
+
+        # calculate ramp between fs and us grads
+        ramp_time_between = set_on_grad_raster_time(system=system, time=(acc_max - 1) * grad_amp_fs / system.max_slew)
+        # calculate how much lines we miss when ramping (including oversampling)
+        num_missed_lines_per_ramp = int(np.ceil(ramp_time_between / params.dwell))
+        # calculate num of outer lines
+        num_outer_lines = params.resolutionBase - params.numberOfCentralLines - 2 * num_missed_lines_per_ramp
+        # per gradient
+        num_out_lines_per_grad = int(num_outer_lines / 2)
+        # flat time
+        flat_time_us = set_on_grad_raster_time(system=system, time=num_out_lines_per_grad * params.dwell)
+        flat_time_fs = set_on_grad_raster_time(system=system, time=params.numberOfCentralLines * params.dwell)
+
+        # stitch them together / need to make each adc separate so we will return 3 blocks here
+        ramp_time = set_on_grad_raster_time(system=system, time=grad_amp_us/system.max_slew)
+
+        # build parts
+        grad_read_parts_generic = events.GRAD()
+        grad_read_parts_generic.system = system
+        grad_read_parts_generic.channel = params.read_dir
+        grad_read_parts_generic.t_delay_s = 0.0
+        grad_read_parts_generic.max_grad = system.max_grad
+        grad_read_parts_generic.max_slew = system.max_slew
+
+        # first section
+        grad_read_a = events.GRAD.copy(grad_read_parts_generic)
+        grad_read_a.amplitude = np.array([
+            0.0, grad_amp_us, grad_amp_us
+        ])
+        grad_read_a.t_array_s = np.array([
+            0.0, ramp_time, ramp_time + flat_time_us
+        ])
+        grad_read_a.area = 0.5 * ramp_time * grad_amp_us + flat_time_us * grad_amp_us
+        grad_read_a.flat_area = grad_amp_us * flat_time_us
+        grad_read_a.t_rise_time_s = ramp_time
+        grad_read_a.t_flat_time_s = flat_time_us
+        grad_read_a.t_duration_s = grad_read_a.get_duration()
+
+        # middle section
+        grad_read_b = events.GRAD.copy(grad_read_parts_generic)
+        grad_read_b.amplitude = np.array([
+            grad_amp_us, grad_amp_fs, grad_amp_fs
+        ])
+        grad_read_b.t_array_s = np.array([
+            0.0, ramp_time_between, ramp_time_between + flat_time_fs
+        ])
+        grad_read_b.area = 0.5 * ramp_time_between * (grad_amp_us - grad_amp_fs) + ramp_time_between * grad_amp_fs + \
+                           grad_amp_fs * flat_time_fs
+        grad_read_b.flat_area = grad_amp_fs * flat_time_fs
+        grad_read_b.t_rise_time_s = ramp_time_between
+        grad_read_b.t_flat_time_s = flat_time_fs
+        grad_read_b.t_duration_s = grad_read_b.get_duration()
+
+        # last section
+        grad_read_c = events.GRAD.copy(grad_read_parts_generic)
+        grad_read_c.amplitude = np.array([
+            grad_amp_fs, grad_amp_us, grad_amp_us, 0.0
+        ])
+        grad_read_c.t_array_s = np.array([
+            0.0, ramp_time_between, ramp_time_between + flat_time_us, ramp_time_between + flat_time_us + ramp_time
+        ])
+        grad_read_c.area = 0.5 * ramp_time_between * (grad_amp_us - grad_amp_fs) + ramp_time_between * grad_amp_fs + \
+                           grad_amp_us * flat_time_us + 0.5 * grad_amp_us * ramp_time
+        grad_read_c.flat_area = grad_amp_us * flat_time_us
+        grad_read_c.t_rise_time_s = ramp_time
+        grad_read_c.t_flat_time_s = flat_time_us
+        grad_read_c.t_duration_s = grad_read_c.get_duration()
+
+        adc_short = events.ADC.make_adc(
+            system=system,
+            dwell=params.dwell,
+            num_samples=num_out_lines_per_grad
+        )
+        adc_long = events.ADC.make_adc(
+            system=system,
+            dwell=params.dwell,
+            num_samples=params.numberOfCentralLines
+        )
+
+        grads = [grad_read_a, grad_read_b, grad_read_c]
+        if invert_grad_dir:
+            for grad in grads:
+                grad.amplitude = -grad.amplitude
+                grad.area = - grad.area
+                grad.flat_area = - grad.area
+
+        adc_short.t_delay_s = grad_read_a.t_array_s[1]
+        acq_0 = EventBlock(grad_read=grad_read_a, adc=adc_short)
+
+        adc_long.t_delay_s = grad_read_b.t_array_s[1]
+        acq_1 = EventBlock(grad_read=grad_read_b, adc=adc_long)
+
+        adc_short.t_delay_s = grad_read_c.t_array_s[1]
+        acq_2 = EventBlock(grad_read=grad_read_c, adc=adc_short)
+
+        return acq_0, acq_1, acq_2
+
+    @classmethod
+    def build_spoiler_end(cls, params: options.SequenceParameters, system: pp.Opts):
         grad_read = events.GRAD.make_trapezoid(
             channel=params.read_dir, system=system,
             flat_area=params.deltaK_read * params.resolutionNRead, flat_time=params.acquisitionTime
