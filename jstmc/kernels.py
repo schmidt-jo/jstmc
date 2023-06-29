@@ -5,7 +5,6 @@ from jstmc import events, options
 import numpy as np
 import pypulseq as pp
 import logging
-copy
 
 logModule = logging.getLogger(__name__)
 
@@ -14,7 +13,12 @@ def set_on_grad_raster_time(system: pp.Opts, time: float):
     return np.ceil(time / system.grad_raster_time) * system.grad_raster_time
 
 
-class EventBlock:
+class Kernel:
+    """
+    kernel class, representation of one block for a sequence containing RF, ADC, Delay and all gradient events.
+    Collection of methods to build predefined blocks for reusage
+    """
+
     def __init__(
             self, system: pp.Opts = pp.Opts(),
             rf: events.RF = events.RF(),
@@ -50,8 +54,8 @@ class EventBlock:
         return np.max([t.get_duration() for t in self.list_events()])
 
     @classmethod
-    def build_excitation(cls, params: options.SequenceParameters, system: pp.Opts,
-                         use_slice_spoiling: bool = True, adjust_ramp_area: float = 0.0):
+    def excitation_slice_sel(cls, params: options.SequenceParameters, system: pp.Opts,
+                             use_slice_spoiling: bool = True, adjust_ramp_area: float = 0.0):
         # Excitation
         logModule.info("setup excitation")
         if use_slice_spoiling:
@@ -100,8 +104,8 @@ class EventBlock:
         return cls(rf=rf, grad_slice=grad_slice)
 
     @classmethod
-    def build_refocus(cls, params: options.SequenceParameters, system: pp.Opts,
-                      pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
+    def refocus_slice_sel_spoil(cls, params: options.SequenceParameters, system: pp.Opts,
+                                pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
         # calculate read gradient in order to use correct area (corrected for ramps
         acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime)
         grad_read = events.GRAD.make_trapezoid(
@@ -216,7 +220,7 @@ class EventBlock:
             return _instance
 
     @classmethod
-    def build_fs_acquisition(cls, params: options.SequenceParameters, system: pp.Opts):
+    def acquisition_fs(cls, params: options.SequenceParameters, system: pp.Opts):
         # block : adc + read grad
         logModule.info("setup acquisition")
         acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime + system.adc_dead_time)
@@ -241,7 +245,57 @@ class EventBlock:
         return cls(adc=adc, grad_read=grad_read)
 
     @classmethod
-    def build_pf_acquisition(cls, params: options.SequenceParameters, system: pp.Opts):
+    def acquisition_fid_nav(cls, params: options.SequenceParameters, system: pp.Opts,
+                            line_num: int):
+        if line_num == 0:
+            logModule.info("setup FID Navigator")
+        # want 1/5th  of resolution of original image (i.e. if 0.7mm iso in read direction, we get 3.5 mm resolution)
+        # hence we need only 1/5th of the number of points with same delta k, want this to be divisible by 2
+        # (center half line inclusion out)
+        num_samples_per_read = int(params.resolutionNRead / 5 / 2)
+        # after first line we step one incr
+        grad_phase = events.GRAD.make_trapezoid(
+            channel=params.phase_dir,
+            area=params.deltaK_phase,
+            system=system
+        )
+        if line_num > 0:
+            # full line
+            num_samples_per_read *= 2
+            # for each odd line we need to step one further to negative
+            grad_phase = events.GRAD.make_trapezoid(
+                channel=params.phase_dir,
+                area=np.power(-1, line_num) * (line_num+1) * params.deltaK_phase,
+                system=system
+            )
+        acquisition_window = set_on_grad_raster_time(
+            system=system,
+            time=params.dwell * num_samples_per_read * params.oversampling + system.adc_dead_time
+        )
+        grad_read = events.GRAD.make_trapezoid(
+            channel=params.read_dir,
+            flat_area=np.power(-1, line_num) * params.deltaK_read * num_samples_per_read,
+            flat_time=acquisition_window,  # given in [s] via options
+            system=system
+        )
+        adc = events.ADC.make_adc(
+            num_samples=int(num_samples_per_read * params.oversampling),
+            dwell=params.dwell,
+            system=system
+        )
+        delay = (grad_read.get_duration() - adc.get_duration()) / 2
+        if delay < 0:
+            err = f"adc longer than read gradient"
+            logModule.error(err)
+            raise ValueError(err)
+        adc.t_delay_s = delay
+        # get duration of adc and start phase blip when adc is over (possibly during ramp of read)
+        grad_phase.t_delay_s = grad_phase.set_on_raster(adc.get_duration(), double=False)
+        # finished block
+        return cls(adc=adc, grad_read=grad_read, grad_phase=grad_phase)
+
+    @classmethod
+    def acquisition_pf_undersampled(cls, params: options.SequenceParameters, system: pp.Opts):
         # block : adc + read grad
         logModule.info("setup acquisition w undersampling partial fourier read")
         pf_factor = 0.75
@@ -274,7 +328,8 @@ class EventBlock:
         return acq_block, area_pre_read
 
     @classmethod
-    def build_us_acquisition(cls, params: options.SequenceParameters, system: pp.Opts, invert_grad_dir: bool = False):
+    def acquisition_sym_undersampled(cls, params: options.SequenceParameters, system: pp.Opts,
+                                     invert_grad_dir: bool = False, asym_accelerated: bool = False):
         logModule.info("setup acquisition w undersampling")
         # calculate maximum acc factor -> want to keep snr -> ie bandwidth ie. dwell equal and stretch read grad
         grad_amp_fs = params.deltaK_read / params.dwell
@@ -285,10 +340,15 @@ class EventBlock:
 
         # calculate ramp between fs and us grads
         ramp_time_between = set_on_grad_raster_time(system=system, time=(acc_max - 1) * grad_amp_fs / system.max_slew)
+        # want to set it to multiples of dwell time
         # calculate how much lines we miss when ramping (including oversampling)
-        num_missed_lines_per_ramp = int(np.ceil(ramp_time_between / params.dwell))
+        num_adc_per_ramp = int(np.ceil(ramp_time_between / params.dwell))
+        ramp_time_between = set_on_grad_raster_time(system=system,
+                                                    time=num_adc_per_ramp * params.dwell)
         # calculate num of outer lines
-        num_outer_lines = params.resolutionBase - params.numberOfCentralLines - 2 * num_missed_lines_per_ramp
+        num_outer_lines = int((params.resolutionBase - params.numberOfCentralLines - 2 * num_adc_per_ramp) / acc_max)
+        # total lines including lost ones plus acceleration
+        num_lines_total = params.numberOfCentralLines + 2 * num_adc_per_ramp + num_outer_lines
         # per gradient
         num_out_lines_per_grad = int(num_outer_lines / 2)
         # flat time
@@ -297,90 +357,100 @@ class EventBlock:
 
         # stitch them together / need to make each adc separate so we will return 3 blocks here
         ramp_time = set_on_grad_raster_time(system=system, time=grad_amp_us/system.max_slew)
+        # ramp area in between
+        ramp_between_area = 0.5 * ramp_time_between * (grad_amp_us - grad_amp_fs) + ramp_time_between * grad_amp_fs
 
-        # build parts
-        grad_read_parts_generic = events.GRAD()
-        grad_read_parts_generic.system = system
-        grad_read_parts_generic.channel = params.read_dir
-        grad_read_parts_generic.t_delay_s = 0.0
-        grad_read_parts_generic.max_grad = system.max_grad
-        grad_read_parts_generic.max_slew = system.max_slew
+        # build
+        grad_read = events.GRAD()
+        grad_read.system = system
+        grad_read.channel = params.read_dir
+        grad_read.t_delay_s = 0.0
+        grad_read.max_grad = system.max_grad
+        grad_read.max_slew = system.max_slew
 
-        # first section
-        grad_read_a = events.GRAD.copy(grad_read_parts_generic)
-        grad_read_a.amplitude = np.array([
-            0.0, grad_amp_us, grad_amp_us
-        ])
-        grad_read_a.t_array_s = np.array([
-            0.0, ramp_time, ramp_time + flat_time_us
-        ])
-        grad_read_a.area = 0.5 * ramp_time * grad_amp_us + flat_time_us * grad_amp_us
-        grad_read_a.flat_area = grad_amp_us * flat_time_us
-        grad_read_a.t_rise_time_s = ramp_time
-        grad_read_a.t_flat_time_s = flat_time_us
-        grad_read_a.t_duration_s = grad_read_a.get_duration()
+        if asym_accelerated:
+            grad_read.amplitude = np.array([
+                0.0,
+                grad_amp_fs,
+                grad_amp_fs,
+                grad_amp_us,
+                grad_amp_us,
+                0.0
+            ])
+            # calculate lower grad amp ramp
+            grad_read.t_array_s = np.array([
+                0.0,
+                ramp_time,
+                ramp_time + 1.5 * flat_time_fs,
+                ramp_time + 1.5 * flat_time_fs + ramp_time_between,
+                ramp_time + 1.5 * flat_time_fs + ramp_time_between + flat_time_us,
+                2 * ramp_time + 1.5 * flat_time_fs + ramp_time_between + flat_time_fs,
+            ])
+            # ToDo!
+            grad_read.area = np.array([
+                flat_time_fs * grad_amp_fs,
+                0.5 * ramp_time * grad_amp_us + flat_time_us * grad_amp_us + ramp_between_area,
+            ])
+            # ToDo
+            adc = events.ADC.make_adc(
+                system=system,
+                dwell=params.dwell,
+                num_samples=num_lines_total
+            )
 
-        # middle section
-        grad_read_b = events.GRAD.copy(grad_read_parts_generic)
-        grad_read_b.amplitude = np.array([
-            grad_amp_us, grad_amp_fs, grad_amp_fs
-        ])
-        grad_read_b.t_array_s = np.array([
-            0.0, ramp_time_between, ramp_time_between + flat_time_fs
-        ])
-        grad_read_b.area = 0.5 * ramp_time_between * (grad_amp_us - grad_amp_fs) + ramp_time_between * grad_amp_fs + \
-                           grad_amp_fs * flat_time_fs
-        grad_read_b.flat_area = grad_amp_fs * flat_time_fs
-        grad_read_b.t_rise_time_s = ramp_time_between
-        grad_read_b.t_flat_time_s = flat_time_fs
-        grad_read_b.t_duration_s = grad_read_b.get_duration()
+        else:
+            grad_read.amplitude = np.array([
+                0.0,
+                grad_amp_us,
+                grad_amp_us,
+                grad_amp_fs,
+                grad_amp_fs,
+                grad_amp_us,
+                grad_amp_us,
+                0.0
+            ])
+            grad_read.t_array_s = np.array([
+                0.0,
+                ramp_time,
+                ramp_time + flat_time_us,
+                ramp_time + flat_time_us + ramp_time_between,
+                ramp_time + flat_time_us + ramp_time_between + flat_time_fs,
+                ramp_time + flat_time_us + 2 * ramp_time_between + flat_time_fs,
+                ramp_time + 2 * flat_time_us + 2 * ramp_time_between + flat_time_fs,
+                2 * ramp_time + 2 * flat_time_us + 2 * ramp_time_between + flat_time_fs,
+            ])
+            grad_read.area = np.array([
+                0.5 * ramp_time * grad_amp_us + flat_time_us * grad_amp_us + ramp_between_area,
+                flat_time_fs * grad_amp_fs,
+                0.5 * ramp_time * grad_amp_us + flat_time_us * grad_amp_us + ramp_between_area,
+            ])
+            grad_read.flat_area = np.array([
+                grad_amp_us * flat_time_us,
+                grad_amp_fs * flat_time_fs,
+                grad_amp_us * flat_time_us
+            ])
+            grad_read.t_rise_time_s = ramp_time
+            grad_read.t_flat_time_s = 2 * flat_time_us * flat_time_fs
+            grad_read.t_duration_s = grad_read.get_duration()
 
-        # last section
-        grad_read_c = events.GRAD.copy(grad_read_parts_generic)
-        grad_read_c.amplitude = np.array([
-            grad_amp_fs, grad_amp_us, grad_amp_us, 0.0
-        ])
-        grad_read_c.t_array_s = np.array([
-            0.0, ramp_time_between, ramp_time_between + flat_time_us, ramp_time_between + flat_time_us + ramp_time
-        ])
-        grad_read_c.area = 0.5 * ramp_time_between * (grad_amp_us - grad_amp_fs) + ramp_time_between * grad_amp_fs + \
-                           grad_amp_us * flat_time_us + 0.5 * grad_amp_us * ramp_time
-        grad_read_c.flat_area = grad_amp_us * flat_time_us
-        grad_read_c.t_rise_time_s = ramp_time
-        grad_read_c.t_flat_time_s = flat_time_us
-        grad_read_c.t_duration_s = grad_read_c.get_duration()
+            adc = events.ADC.make_adc(
+                system=system,
+                dwell=params.dwell,
+                num_samples=num_lines_total
+            )
 
-        adc_short = events.ADC.make_adc(
-            system=system,
-            dwell=params.dwell,
-            num_samples=num_out_lines_per_grad
-        )
-        adc_long = events.ADC.make_adc(
-            system=system,
-            dwell=params.dwell,
-            num_samples=params.numberOfCentralLines
-        )
-
-        grads = [grad_read_a, grad_read_b, grad_read_c]
         if invert_grad_dir:
-            for grad in grads:
-                grad.amplitude = -grad.amplitude
-                grad.area = - grad.area
-                grad.flat_area = - grad.area
+            grad_read.amplitude = -grad_read.amplitude
+            grad_read.area = - grad_read.area
+            grad_read.flat_area = - grad_read.area
 
-        adc_short.t_delay_s = grad_read_a.t_array_s[1]
-        acq_0 = EventBlock(grad_read=grad_read_a, adc=adc_short)
+        adc.t_delay_s = grad_read.t_array_s[1]
+        acq = Kernel(grad_read=grad_read, adc=adc)
 
-        adc_long.t_delay_s = grad_read_b.t_array_s[1]
-        acq_1 = EventBlock(grad_read=grad_read_b, adc=adc_long)
-
-        adc_short.t_delay_s = grad_read_c.t_array_s[1]
-        acq_2 = EventBlock(grad_read=grad_read_c, adc=adc_short)
-
-        return acq_0, acq_1, acq_2
+        return acq
 
     @classmethod
-    def build_spoiler_end(cls, params: options.SequenceParameters, system: pp.Opts):
+    def spoil_all_grads(cls, params: options.SequenceParameters, system: pp.Opts):
         grad_read = events.GRAD.make_trapezoid(
             channel=params.read_dir, system=system,
             flat_area=params.deltaK_read * params.resolutionNRead, flat_time=params.acquisitionTime
@@ -426,6 +496,7 @@ class EventBlock:
         )
         return cls(system=system, grad_slice=grad_slice, grad_phase=grad_phase, grad_read=grad_read_spoil)
 
+
     def plot(self):
         plt.style.use('ggplot')
         rf_color = '#7300e6'
@@ -437,39 +508,47 @@ class EventBlock:
         x_arr = np.arange(int(np.round(self.get_duration() * 1e6)))
         # rf
         rf = np.zeros_like(x_arr, dtype=complex)
-        start = int(self.rf.t_delay_s * 1e6)
-        end = int(1e6 * self.rf.get_duration()) - int(1e6 * self.rf.t_ringdown_s)
-        rf[start:end] = self.rf.signal
-        rf_abs = np.abs(rf) / np.max(np.abs(rf))
+        if self.rf.get_duration() > 0:
+            start = int(self.rf.t_delay_s * 1e6)
+            end = int(1e6 * self.rf.get_duration()) - int(1e6 * self.rf.t_ringdown_s)
+            rf[start:end] = self.rf.signal
+        rf_abs = np.divide(
+            np.abs(rf),
+            np.max(np.abs(rf)),
+            where=np.max(np.abs(rf)) > 0,
+            out=np.zeros_like(rf, dtype=float))
         rf_angle = np.angle(rf) / np.pi
         rf_angle[rf_abs > 1e-7] += self.rf.phase_rad / np.pi
 
         # grad slice
         grad_ss = np.zeros_like(x_arr, dtype=float)
-        del_start = int(1e6 * self.grad_slice.t_delay_s)
-        for t_idx in np.arange(1, self.grad_slice.t_array_s.shape[0]):
-            start = int(1e6 * self.grad_slice.t_array_s[t_idx - 1])
-            end = int(1e6 * self.grad_slice.t_array_s[t_idx])
-            grad_ss[del_start + start:del_start + end] = np.linspace(self.grad_slice.amplitude[t_idx - 1],
-                                                                     self.grad_slice.amplitude[t_idx], end - start)
+        if self.grad_slice.get_duration() > 0:
+            del_start = int(1e6 * self.grad_slice.t_delay_s)
+            for t_idx in np.arange(1, self.grad_slice.t_array_s.shape[0]):
+                start = int(1e6 * self.grad_slice.t_array_s[t_idx - 1])
+                end = int(1e6 * self.grad_slice.t_array_s[t_idx])
+                grad_ss[del_start + start:del_start + end] = np.linspace(self.grad_slice.amplitude[t_idx - 1],
+                                                                         self.grad_slice.amplitude[t_idx], end - start)
 
         # grad read
         grad_read = np.zeros_like(x_arr, dtype=float)
-        del_start = int(1e6 * self.grad_read.t_delay_s)
-        for t_idx in np.arange(1, self.grad_read.t_array_s.shape[0]):
-            start = int(1e6 * self.grad_read.t_array_s[t_idx - 1])
-            end = int(1e6 * self.grad_read.t_array_s[t_idx])
-            grad_read[del_start + start:del_start + end] = np.linspace(self.grad_read.amplitude[t_idx - 1],
-                                                                       self.grad_read.amplitude[t_idx], end - start)
+        if self.grad_read.get_duration() > 0:
+            del_start = int(1e6 * self.grad_read.t_delay_s)
+            for t_idx in np.arange(1, self.grad_read.t_array_s.shape[0]):
+                start = int(1e6 * self.grad_read.t_array_s[t_idx - 1])
+                end = int(1e6 * self.grad_read.t_array_s[t_idx])
+                grad_read[del_start + start:del_start + end] = np.linspace(self.grad_read.amplitude[t_idx - 1],
+                                                                           self.grad_read.amplitude[t_idx], end - start)
 
         # grad phase
         grad_phase = np.zeros_like(x_arr, dtype=float)
-        del_start = int(1e6 * self.grad_phase.t_delay_s)
-        for t_idx in np.arange(1, self.grad_phase.t_array_s.shape[0]):
-            start = int(1e6 * self.grad_phase.t_array_s[t_idx - 1])
-            end = int(1e6 * self.grad_phase.t_array_s[t_idx])
-            grad_phase[del_start + start:del_start + end] = np.linspace(self.grad_phase.amplitude[t_idx - 1],
-                                                                        self.grad_phase.amplitude[t_idx], end - start)
+        if self.grad_phase.get_duration() > 0:
+            del_start = int(1e6 * self.grad_phase.t_delay_s)
+            for t_idx in np.arange(1, self.grad_phase.t_array_s.shape[0]):
+                start = int(1e6 * self.grad_phase.t_array_s[t_idx - 1])
+                end = int(1e6 * self.grad_phase.t_array_s[t_idx])
+                grad_phase[del_start + start:del_start + end] = np.linspace(self.grad_phase.amplitude[t_idx - 1],
+                                                                            self.grad_phase.amplitude[t_idx], end - start)
 
         # cast to mT / m
         grad_ss *= 1e3 / 42577478.518
