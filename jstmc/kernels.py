@@ -65,7 +65,7 @@ class EventBlock:
                 system=system, duration_s=params.excitationDuration * 1e-6, pulse_type='excitation'
             )
         else:
-            logModule.info(f"rf -- build sync pulse")
+            logModule.info(f"rf -- build gauss pulse")
             time_bw_prod = params.excitationTimeBwProd
             rf = events.RF.make_gauss_pulse(
                 flip_angle_rad=params.excitationRadFA,
@@ -142,7 +142,7 @@ class EventBlock:
                 phase_rad=0.0, pulse_type='refocusing'
             )
         else:
-            logModule.info(f"rf -- build sync pulse")
+            logModule.info(f"rf -- build gauss pulse")
             rf = events.RF.make_gauss_pulse(
                 flip_angle_rad=params.refocusingRadFA[pulse_num],
                 phase_rad=params.refocusingRadRfPhase[pulse_num],
