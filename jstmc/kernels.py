@@ -48,7 +48,7 @@ class Kernel:
 
     def list_events(self):
         event_list = [self.rf, self.grad_read, self.grad_slice, self.grad_phase, self.adc, self.delay]
-        return [ev for ev in event_list if ev.get_duration() > 1e-5]
+        return [ev for ev in event_list if ev.get_duration() > 5e-6]
 
     def get_duration(self):
         return np.max([t.get_duration() for t in self.list_events()])
@@ -249,29 +249,27 @@ class Kernel:
                             line_num: int):
         if line_num == 0:
             logModule.info("setup FID Navigator")
-        # want 1/5th  of resolution of original image (i.e. if 0.7mm iso in read direction, we get 3.5 mm resolution)
-        # hence we need only 1/5th of the number of points with same delta k, want this to be divisible by 2
+        # want 1/6th  of resolution of original image (i.e. if 0.7mm iso in read direction, we get 3.5 mm resolution)
+        # hence we need only 1/6th of the number of points with same delta k, want this to be divisible by 2
         # (center half line inclusion out)
-        num_samples_per_read = int(params.resolutionNRead / 5 / 2)
-        # after first line we step one incr
+        reso_degrading = 6
+        num_samples_per_read = int(params.resolutionNRead / reso_degrading)
+        pe_increments = np.arange(1, int(params.resolutionNPhase / reso_degrading), 2)
+        pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
+        # we step by those increments dependent on line number
         grad_phase = events.GRAD.make_trapezoid(
             channel=params.phase_dir,
-            area=params.deltaK_phase,
+            area=params.deltaK_phase * pe_increments[line_num],
             system=system
         )
         if line_num > 0:
             # full line
             num_samples_per_read *= 2
-            # for each odd line we need to step one further to negative
-            grad_phase = events.GRAD.make_trapezoid(
-                channel=params.phase_dir,
-                area=np.power(-1, line_num) * (line_num+1) * params.deltaK_phase,
-                system=system
-            )
         acquisition_window = set_on_grad_raster_time(
             system=system,
             time=params.dwell * num_samples_per_read * params.oversampling + system.adc_dead_time
         )
+        logModule.debug(f" pe line: {np.sum(pe_increments[:line_num])}")
         grad_read = events.GRAD.make_trapezoid(
             channel=params.read_dir,
             flat_area=np.power(-1, line_num) * params.deltaK_read * num_samples_per_read,
