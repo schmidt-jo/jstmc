@@ -584,9 +584,10 @@ class GRAD(Event):
 
     def get_duration(self):
         # 0 for empty init grad
+        t = self.t_delay_s
         if self.t_array_s.__len__() < 1:
-            return 0.0
-        return self.t_array_s[-1]
+            return t
+        return t + self.t_array_s[-1]
 
     def to_simple_ns(self):
         return types.SimpleNamespace(

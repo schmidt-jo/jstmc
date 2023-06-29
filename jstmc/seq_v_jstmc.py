@@ -19,26 +19,34 @@ class JsTmcSequence(seq_gen.GenSequence):
         self.delay_slice: events.DELAY = events.DELAY()
 
         # sbbs
-        self.block_refocus_1: kernels.EventBlock = kernels.EventBlock.build_refocus(params=self.params,
-                                                                                    system=self.system,
-                                                                                    pulse_num=0)
+        self.block_refocus_1: kernels.Kernel = kernels.Kernel.refocus_slice_sel_spoil(params=self.params,
+                                                                                      system=self.system,
+                                                                                      pulse_num=0)
         ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[
             1] / 2.0
-        self.block_excitation: kernels.EventBlock = kernels.EventBlock.build_excitation(params=self.params,
-                                                                                        system=self.system,
-                                                                                        adjust_ramp_area=ramp_area_ref_1)
+        self.block_excitation: kernels.Kernel = kernels.Kernel.excitation_slice_sel(params=self.params,
+                                                                                    system=self.system,
+                                                                                    adjust_ramp_area=ramp_area_ref_1)
 
-        self.block_acquisition: kernels.EventBlock = kernels.EventBlock.build_fs_acquisition(params=self.params,
-                                                                                             system=self.system)
-        self.block_refocus, self.phase_enc_time = kernels.EventBlock.build_refocus(
+        self.block_acquisition: kernels.Kernel = kernels.Kernel.acquisition_fs(params=self.params,
+                                                                               system=self.system)
+        self.block_refocus, self.phase_enc_time = kernels.Kernel.refocus_slice_sel_spoil(
             params=self.params, system=self.system, pulse_num=1, return_pe_time=True
         )
-        self.block_spoil_end: kernels.EventBlock = kernels.EventBlock.build_spoiler_end(params=self.params,
-                                                                                        system=self.system)
+        self.block_spoil_end: kernels.Kernel = kernels.Kernel.spoil_all_grads(params=self.params,
+                                                                              system=self.system)
+        self.block_fid_nav = [kernels.Kernel.acquisition_fid_nav(
+            params=self.params,
+            system=self.system,
+            line_num=k
+        ) for k in range(int(self.params.resolutionNPhase / 5))]
+
         if self.seq.config.visualize:
             self.block_excitation.plot()
             self.block_refocus_1.plot()
             self.block_refocus.plot()
+            for k in range(5):
+                self.block_fid_nav[k].plot()
 
     def calculate_min_esp(self):
         # calculate time between midpoints
@@ -74,6 +82,8 @@ class JsTmcSequence(seq_gen.GenSequence):
         t_post_etl = self.block_acquisition.get_duration() / 2 + self.phase_enc_time
 
         t_total_etl = t_pre_etl + t_etl + t_post_etl
+        # time for fid navs
+        t_total_fid_nav = 2 * np.sum([b.get_duration() for b in self.block_fid_nav])
 
         max_num_slices = int(np.floor(self.params.TR * 1e-3 / t_total_etl))
         logModule.info(f"\t\t-total echo train length: {t_total_etl * 1e3:.2f} ms")
