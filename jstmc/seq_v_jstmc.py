@@ -35,16 +35,26 @@ class JsTmcSequence(seq_gen.GenSequence):
         )
         self.block_spoil_end: kernels.Kernel = kernels.Kernel.spoil_all_grads(params=self.params,
                                                                               system=self.system)
+        self.block_excitation_nav: kernels.Kernel = kernels.Kernel.excitation_slice_sel(
+            params=self.params, system=self.system, use_slice_spoiling=False)
+
+        # a bit intricate and hidden: we want to skip lines here:
+        # acquire line [0, 1, -2, 3, -4, 5 ...] etc i.e. half of the lines + 1, in general only 6th of resolution
         self.block_fid_nav = [kernels.Kernel.acquisition_fid_nav(
             params=self.params,
             system=self.system,
             line_num=k
-        ) for k in range(int(self.params.resolutionNPhase / 5))]
+        ) for k in range(int(self.params.resolutionNPhase / 6 / 2))]
+        # add spoiling
+        self.block_fid_nav.append(self.block_spoil_end)
+        # add delay
+        self.block_fid_nav.append(kernels.Kernel(system=self.system, delay=events.DELAY.make_delay(delay=10e-3)))
 
         if self.seq.config.visualize:
             self.block_excitation.plot()
             self.block_refocus_1.plot()
             self.block_refocus.plot()
+            self.block_excitation_nav.plot()
             for k in range(5):
                 self.block_fid_nav[k].plot()
 
@@ -79,13 +89,15 @@ class JsTmcSequence(seq_gen.GenSequence):
         # time per echo train
         t_pre_etl = self.block_excitation.rf.t_delay_s + self.block_excitation.rf.t_duration_s / 2
         t_etl = self.params.ETL * self.params.ESP * 1e-3  # esp in ms
-        t_post_etl = self.block_acquisition.get_duration() / 2 + self.phase_enc_time
+        t_post_etl = self.block_acquisition.get_duration() / 2 + self.block_spoil_end.get_duration()
 
         t_total_etl = t_pre_etl + t_etl + t_post_etl
         # time for fid navs
         t_total_fid_nav = 2 * np.sum([b.get_duration() for b in self.block_fid_nav])
-
-        max_num_slices = int(np.floor(self.params.TR * 1e-3 / t_total_etl))
+        logModule.info(f"\t\t-total fid-nav time (2 navs + delay or 10ms): {t_total_fid_nav}")
+        # deminish TR by FIDnavs
+        tr_eff = self.params.TR * 1e-3 - t_total_fid_nav
+        max_num_slices = int(np.floor(tr_eff / t_total_etl))
         logModule.info(f"\t\t-total echo train length: {t_total_etl * 1e3:.2f} ms")
         logModule.info(f"\t\t-desired number of slices: {self.params.resolutionNumSlices}")
         logModule.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
@@ -93,7 +105,7 @@ class JsTmcSequence(seq_gen.GenSequence):
             logModule.info(f"increase TR or Concatenation needed")
 
         self.delay_slice = events.DELAY.make_delay(
-            self.params.TR * 1e-3 / self.params.resolutionNumSlices - t_total_etl, system=self.system
+            tr_eff / self.params.resolutionNumSlices - t_total_etl, system=self.system
         )
         logModule.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
         if not self.delay_slice.check_on_block_raster():
@@ -119,9 +131,16 @@ class JsTmcSequence(seq_gen.GenSequence):
         logModule.info(f"build -- loop lines")
         self._loop_lines()
 
-    def _write_sampling_pattern(self, echo_idx: int, phase_idx: int, slice_idx: int):
-        pe_num = self.k_indexes[echo_idx, phase_idx]
-        sampling_index = {"pe_num": pe_num, "slice_num": int(self.trueSliceNum[slice_idx]), "echo_num": echo_idx}
+    def _write_sampling_pattern(self, echo_idx: int, phase_idx: int, slice_idx: int,
+                                nav_idx: int = -1, nav_type: bool = False, nav_line: int = None):
+        if nav_idx > -1:
+            # we have a navigator
+            sampling_index = {"pe_num": -1, "slice_num": -1,
+                              "echo_num": -1, "nav_num": nav_idx, "nav_id": int(nav_type), "nav_line": nav_line}
+        else:
+            pe_num = self.k_indexes[echo_idx, phase_idx]
+            sampling_index = {"pe_num": pe_num, "slice_num": int(self.trueSliceNum[slice_idx]),
+                              "echo_num": echo_idx, "nav_num": -1, " nav_type": -1, " nav_line": nav_line}
         self.sampling_pattern.append(sampling_index)
 
     def _loop_lines(self):
@@ -186,8 +205,26 @@ class JsTmcSequence(seq_gen.GenSequence):
                 # spoil end
                 self._set_end_spoil_phase_grad()
                 self.seq.ppSeq.add_block(*self.block_spoil_end.list_events_to_ns())
-                # insert TR
+                # insert slice delay
                 self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
+            for nav_idx in range(2):
+                self._apply_slice_offset_fid_nav(idx_nav=nav_idx)
+                # excitation
+                # add block
+                self.seq.ppSeq.add_block(*self.block_excitation_nav.list_events_to_ns())
+                # epi style nav read
+                line_counter = 0
+                pe_increments = np.arange(1, int(self.params.resolutionNPhase / 6), 2)
+                pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
+                for b_idx in range(self.block_fid_nav.__len__()):
+                    b = self.block_fid_nav[b_idx]
+                    self.seq.ppSeq.add_block(*b.list_events_to_ns())
+                    if b.adc.get_duration() > 0:
+                        nav_line_pe = np.sum(pe_increments[:line_counter])
+                        self._write_sampling_pattern(echo_idx=-1, phase_idx=-1, slice_idx=-1,
+                                                     nav_idx=idx_n, nav_type=bool(nav_idx), nav_line=int(nav_line_pe))
+                        line_counter += 1
+
         logModule.info(f"sequence built!")
 
     def _set_fa(self, echo_idx: int):
@@ -240,6 +277,26 @@ class JsTmcSequence(seq_gen.GenSequence):
             # we are setting the phase of a pulse here into its phase offset var.
             # To merge both: given phase parameter and any complex signal array data
             sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
+
+    def _apply_slice_offset_fid_nav(self, idx_nav: int):
+        sbb = self.block_excitation_nav
+        grad_slice_amplitude_hz = sbb.grad_slice.amplitude[sbb.grad_slice.t_array_s >= sbb.rf.t_delay_s][0]
+        # want to set the navs outside of the slice profile with equal distance to the rest of slices
+        if idx_nav == 0:
+            # first nav below slice slab
+            z = np.min(self.z) - np.abs(np.diff(self.z)[0])
+        elif idx_nav == 1:
+            # second nav above slice slab
+            z = np.max(self.z) + np.abs(np.diff(self.z)[0])
+        else:
+            err = f"sequence setup for only 2 navigators outside slice slab, " \
+                  f"index {idx_nav} was given (should be 0 or 1)"
+            logModule.error(err)
+            raise ValueError(err)
+        sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * z
+        # we are setting the phase of a pulse here into its phase offset var.
+        # To merge both: given phase parameter and any complex signal array data
+        sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
 
     def _set_delta_slices(self):
         # multi-slice
