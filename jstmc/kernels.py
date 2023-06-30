@@ -246,15 +246,14 @@ class Kernel:
 
     @classmethod
     def acquisition_fid_nav(cls, params: options.SequenceParameters, system: pp.Opts,
-                            line_num: int):
+                            line_num: int, reso_degrading: float = 1/6):
         if line_num == 0:
             logModule.info("setup FID Navigator")
         # want 1/6th  of resolution of original image (i.e. if 0.7mm iso in read direction, we get 3.5 mm resolution)
         # hence we need only 1/6th of the number of points with same delta k, want this to be divisible by 2
         # (center half line inclusion out)
-        reso_degrading = 6
-        num_samples_per_read = int(params.resolutionNRead / reso_degrading)
-        pe_increments = np.arange(1, int(params.resolutionNPhase / reso_degrading), 2)
+        num_samples_per_read = int(params.resolutionNRead * reso_degrading)
+        pe_increments = np.arange(1, int(params.resolutionNPhase * reso_degrading), 2)
         pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
         # we step by those increments dependent on line number
         grad_phase = events.GRAD.make_trapezoid(
@@ -262,9 +261,6 @@ class Kernel:
             area=params.deltaK_phase * pe_increments[line_num],
             system=system
         )
-        if line_num > 0:
-            # full line
-            num_samples_per_read *= 2
         acquisition_window = set_on_grad_raster_time(
             system=system,
             time=params.dwell * num_samples_per_read * params.oversampling + system.adc_dead_time
