@@ -35,20 +35,11 @@ class JsTmcSequence(seq_gen.GenSequence):
         )
         self.block_spoil_end: kernels.Kernel = kernels.Kernel.spoil_all_grads(params=self.params,
                                                                               system=self.system)
-        self.block_excitation_nav: kernels.Kernel = kernels.Kernel.excitation_slice_sel(
-            params=self.params, system=self.system, use_slice_spoiling=False)
+        # set resolution downgrading for fid navs
+        resolution_defactor: float = 1/6
 
-        # a bit intricate and hidden: we want to skip lines here:
-        # acquire line [0, 1, -2, 3, -4, 5 ...] etc i.e. half of the lines + 1, in general only 6th of resolution
-        self.block_fid_nav = [kernels.Kernel.acquisition_fid_nav(
-            params=self.params,
-            system=self.system,
-            line_num=k
-        ) for k in range(int(self.params.resolutionNPhase / 6 / 2))]
-        # add spoiling
-        self.block_fid_nav.append(self.block_spoil_end)
-        # add delay
-        self.block_fid_nav.append(kernels.Kernel(system=self.system, delay=events.DELAY.make_delay(delay=10e-3)))
+        self.block_excitation_nav: kernels.Kernel = self._set_excitation_fid_nav(resolution_defactor=resolution_defactor)
+        self.block_list_fid_nav_acq: list = self._set_acquisition_fid_nav(resolution_defactor=resolution_defactor)
 
         if self.seq.config.visualize:
             self.block_excitation.plot()
@@ -56,7 +47,45 @@ class JsTmcSequence(seq_gen.GenSequence):
             self.block_refocus.plot()
             self.block_excitation_nav.plot()
             for k in range(5):
-                self.block_fid_nav[k].plot()
+                self.block_list_fid_nav_acq[k].plot()
+
+    def _set_acquisition_fid_nav(self, resolution_defactor: float = 1/6) -> list:
+        # a bit intricate and hidden: we want to skip lines here:
+        # acquire line [0, 1, -2, 3, -4, 5 ...] etc i.e. half of the lines + 1, in general only nth of resolution
+        # setup with 2 times acceleration (skipping of every other line
+        block_fid_nav = [kernels.Kernel.acquisition_fid_nav(
+            params=self.params,
+            system=self.system,
+            line_num=k,
+            reso_degrading=resolution_defactor
+        ) for k in range(int(self.params.resolutionNPhase * resolution_defactor / 2))]
+        # add spoiling
+        block_fid_nav.append(self.block_spoil_end)
+        # add delay
+        block_fid_nav.append(kernels.Kernel(system=self.system, delay=events.DELAY.make_delay(delay=10e-3)))
+        return block_fid_nav
+
+    def _set_excitation_fid_nav(self, resolution_defactor: float = 1/6) -> kernels.Kernel:
+        # use excitation kernel without spoiling
+        k_ex = kernels.Kernel.excitation_slice_sel(params=self.params, system=self.system, use_slice_spoiling=False)
+        # set up prephasing gradient for fid readouts
+        # get timings
+        t_spoiling = np.sum(np.diff(k_ex.grad_slice.t_array_s[-4:]))
+        t_spoiling_start = k_ex.grad_slice.t_array_s[-4]
+        # get area
+        num_samples_per_read = int(self.params.resolutionNRead * resolution_defactor)
+        grad_read_area = events.GRAD.make_trapezoid(
+            channel=self.params.read_dir, system=self.system,
+            flat_area=num_samples_per_read * self.params.deltaK_read,
+            flat_time=self.params.dwell * num_samples_per_read
+        ).area
+        # need half of this area (includes ramps etc)
+        grad_read_pre = events.GRAD.make_trapezoid(
+            channel=self.params.read_dir, system=self.system, area=-grad_read_area / 2,
+            duration_s=float(t_spoiling), delay_s=t_spoiling_start
+        )
+        k_ex.grad_read = grad_read_pre
+        return k_ex
 
     def calculate_min_esp(self):
         # calculate time between midpoints
@@ -92,9 +121,13 @@ class JsTmcSequence(seq_gen.GenSequence):
         t_post_etl = self.block_acquisition.get_duration() / 2 + self.block_spoil_end.get_duration()
 
         t_total_etl = t_pre_etl + t_etl + t_post_etl
-        # time for fid navs
-        t_total_fid_nav = 2 * np.sum([b.get_duration() for b in self.block_fid_nav])
-        logModule.info(f"\t\t-total fid-nav time (2 navs + delay or 10ms): {t_total_fid_nav}")
+        # time for fid navs - one delay in between
+        t_total_fid_nav = np.sum(
+            [b.get_duration() for b in self.block_list_fid_nav_acq]
+        ) + np.sum(
+            [b.get_duration() for b in self.block_list_fid_nav_acq[:-1]]
+        )
+        logModule.info(f"\t\t-total fid-nav time (2 navs + 1 delay of 10ms): {t_total_fid_nav*1e3:.2f} ms")
         # deminish TR by FIDnavs
         tr_eff = self.params.TR * 1e-3 - t_total_fid_nav
         max_num_slices = int(np.floor(tr_eff / t_total_etl))
@@ -103,9 +136,10 @@ class JsTmcSequence(seq_gen.GenSequence):
         logModule.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
         if self.params.resolutionNumSlices > max_num_slices:
             logModule.info(f"increase TR or Concatenation needed")
-
+        # we want to add a delay additionally after fid nav block
         self.delay_slice = events.DELAY.make_delay(
-            tr_eff / self.params.resolutionNumSlices - t_total_etl, system=self.system
+            (tr_eff - self.params.resolutionNumSlices * t_total_etl) / (self.params.resolutionNumSlices + 1),
+            system=self.system
         )
         logModule.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
         if not self.delay_slice.check_on_block_raster():
@@ -216,9 +250,14 @@ class JsTmcSequence(seq_gen.GenSequence):
                 line_counter = 0
                 pe_increments = np.arange(1, int(self.params.resolutionNPhase / 6), 2)
                 pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
-                for b_idx in range(self.block_fid_nav.__len__()):
-                    b = self.block_fid_nav[b_idx]
-                    self.seq.ppSeq.add_block(*b.list_events_to_ns())
+                for b_idx in range(self.block_list_fid_nav_acq.__len__()):
+                    b = self.block_list_fid_nav_acq[b_idx]
+                    # in the end we add a delay
+                    if (nav_idx == 1) & (b_idx == self.block_list_fid_nav_acq.__len__() - 1):
+                        self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
+                    # otherwise we add the block
+                    else:
+                        self.seq.ppSeq.add_block(*b.list_events_to_ns())
                     if b.adc.get_duration() > 0:
                         nav_line_pe = np.sum(pe_increments[:line_counter])
                         self._write_sampling_pattern(echo_idx=-1, phase_idx=-1, slice_idx=-1,
