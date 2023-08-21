@@ -233,7 +233,7 @@ class GRAD(Event):
         super().__init__()
         self.channel: str = 'z'
         self.amplitude: typing.Union[float, np.ndarray] = 0.0
-        self.area: float = 0.0
+        self.area: typing.Union[float,np.ndarray] = 0.0
         self.flat_area: float = 0.0
 
         self.t_array_s: np.ndarray = np.zeros(0)
@@ -378,7 +378,7 @@ class GRAD(Event):
                 (moment - asym_amplitude * t_asym_ramp / 2) / max_amplitude + t_asym_ramp / 2 + t_zero_ramp / 2
             )
             if np.abs(get_area_asym_grad(
-                    amp_h=max_amplitude, time_h=t_min_duration-t_asym_ramp-t_zero_ramp,
+                    amp_h=max_amplitude, time_h=t_min_duration - t_asym_ramp - t_zero_ramp,
                     time_htol=t_asym_ramp, time_0toh=t_zero_ramp, amp_l=asym_amplitude)) - np.abs(moment) > 0:
                 # absolute moment was increased, possibly due to np.ceil call in set raster time.
                 # apparent prolonging of timing, we can pull it back by slight decreasing of amplitude
@@ -398,7 +398,8 @@ class GRAD(Event):
                 # we can adopt here also with doubling the ramp times in case we have opposite signs
             # want to minimize timing of gradient - use max grad
             pre_grad_amplitude = np.sign(pre_moment) * system.max_grad
-            duration_pre_grad, pre_grad_amplitude = get_asym_grad_min_duration(max_amplitude=pre_grad_amplitude, moment=pre_moment)
+            duration_pre_grad, pre_grad_amplitude = get_asym_grad_min_duration(max_amplitude=pre_grad_amplitude,
+                                                                               moment=pre_moment)
             if duration_pre_grad < t_minimum_re_grad:
                 # stretch to minimum required time
                 duration_pre_grad = t_minimum_re_grad
@@ -467,7 +468,13 @@ class GRAD(Event):
                     re_grad_amplitude = amplitude
                     ramp_time = grad_instance.set_on_raster(np.abs(re_spoil_moment * 2 / re_grad_amplitude))
                     min_ramp_time = grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
-                    duration_re_grad = np.max([ramp_time, min_ramp_time])
+                    if min_ramp_time > ramp_time:
+                        warn = f"rephasing area low, need only a ramp." \
+                               f"ramp slew rate too high, revert to maximal possible" \
+                               f"-> can lead to slight deviations in ramp area! change spoiling gradient to avoid!"
+                        logModule.warning(warn)
+                        ramp_time = min_ramp_time
+                    duration_re_grad = ramp_time
             t += duration_re_grad
         else:
             t += grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
@@ -601,7 +608,9 @@ class GRAD(Event):
         ax = fig.add_subplot()
         gamma = self.system.gamma
         amplitude = self.amplitude / gamma * 1e3
-        ax.plot(self.t_array_s, amplitude)
+        ax.plot(self.t_array_s * 1e3, amplitude)
+        ax.set_xlabel("time [ms]")
+        ax.set_ylabel("grad amp [mT/m]")
         plt.show()
 
     def calculate_asym_area(self, forward: bool = True):
@@ -656,6 +665,7 @@ class ADC(Event):
         adc_instance.t_dead_time_s = adc_ns.dead_time
         adc_instance.freq_offset_hz = adc_ns.freq_offset
         adc_instance.phase_offset_rad = adc_ns.phase_offset
+        adc_instance.set_on_raster()
         return adc_instance
 
     def get_duration(self):
@@ -668,6 +678,31 @@ class ADC(Event):
             phase_offset=self.phase_offset_rad, type='adc'
         )
 
+    def plot(self):
+        fig = plt.figure()
+        ax = fig.add_subplot()
+        amplitude = np.array([0, 0, 1, 1, 0])
+        times = np.array(
+            [0, self.t_delay_s - 1e-9, self.t_delay_s + 1e-9, self.get_duration() - 1e-9, self.get_duration() + 1e-9])
+        ax.plot(times * 1e3, amplitude)
+        ax.set_xlabel("time [ms]")
+        ax.set_ylabel("ADC")
+        plt.show()
+
+    def set_on_raster(self):
+        raster_time = float(self.system.adc_raster_time)
+        to_set = ["t_dwell_s", "t_delay_s", "t_duration_s"]
+        # save number of samples
+        n = int(self.t_duration_s / self.t_dwell_s)
+        for key in to_set:
+            value = self.__getattribute__(key)
+            if np.abs(value) % raster_time > 1e-9:
+                rastered_value = np.ceil(value / raster_time) * raster_time
+                self.__setattr__(key, rastered_value)
+                if key == "t_dwell_s":
+                    # if dwell changed adopt
+                    self.t_duration_s = n * self.t_dwell_s
+
 
 class DELAY(Event):
     def __init__(self):
@@ -679,6 +714,7 @@ class DELAY(Event):
         delay_instance = cls()
         delay_instance.system = system
         delay_instance.t_duration_s = delay
+        delay_instance.set_on_block_raster()
         return delay_instance
 
     def check_on_block_raster(self) -> bool:
@@ -699,7 +735,7 @@ class DELAY(Event):
         if us_value % us_raster < 1e-4:
             rastered_value = us_value
         else:
-            rastered_value = np.round(us_value / us_raster) * us_raster
+            rastered_value = int(np.ceil(us_value / us_raster) * us_raster)
         self.t_duration_s = rastered_value * 1e-6
 
     def get_duration(self):
