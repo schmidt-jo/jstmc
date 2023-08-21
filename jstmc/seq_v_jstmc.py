@@ -2,6 +2,8 @@ from jstmc import events, options, kernels, seq_gen
 import numpy as np
 import logging
 import tqdm
+from rf_pulse_files import rfpf
+import pandas as pd
 
 logModule = logging.getLogger(__name__)
 
@@ -36,36 +38,44 @@ class JsTmcSequence(seq_gen.GenSequence):
         self.block_spoil_end: kernels.Kernel = kernels.Kernel.spoil_all_grads(params=self.params,
                                                                               system=self.system)
         # set resolution downgrading for fid navs
-        resolution_defactor: float = 1/6
+        self.nav_num = 2
+        # set so the in plane reso is 3 mm
+        self.nav_resolution_defactor: float = self.params.resolutionSliceThickness / 3
 
-        self.block_excitation_nav: kernels.Kernel = self._set_excitation_fid_nav(resolution_defactor=resolution_defactor)
-        self.block_list_fid_nav_acq: list = self._set_acquisition_fid_nav(resolution_defactor=resolution_defactor)
+        self.block_excitation_nav: kernels.Kernel = self._set_excitation_fid_nav()
+        self.block_list_fid_nav_acq: list = self._set_acquisition_fid_nav()
 
         if self.seq.config.visualize:
-            self.block_excitation.plot()
-            self.block_refocus_1.plot()
-            self.block_refocus.plot()
-            self.block_excitation_nav.plot()
+            self.block_excitation.plot(path=self.seq.config.outputPath, name="excitation")
+            self.block_refocus_1.plot(path=self.seq.config.outputPath, name="refocus_1")
+            self.block_refocus.plot(path=self.seq.config.outputPath, name="refocus")
+            self.block_excitation_nav.plot(path=self.seq.config.outputPath, name="nav_excitation")
             for k in range(5):
-                self.block_list_fid_nav_acq[k].plot()
+                self.block_list_fid_nav_acq[k].plot(path=self.seq.config.outputPath, name=f"nav_acq_{k}")
 
-    def _set_acquisition_fid_nav(self, resolution_defactor: float = 1/6) -> list:
-        # a bit intricate and hidden: we want to skip lines here:
-        # acquire line [0, 1, -2, 3, -4, 5 ...] etc i.e. half of the lines + 1, in general only nth of resolution
-        # setup with 2 times acceleration (skipping of every other line
+    def _set_acquisition_fid_nav(self) -> list:
+        # want to use an EPI style readout with acceleration. i.e. skipping of every other line.
+        acceleration_factor = 2
+        # want to go center out. i.e:
+        # acquire line [0, 1, -2, 3, -4, 5 ...] etc i.e. acc_factor_th of the lines + 1,
+        pe_increments = np.arange(
+            1, int(self.params.resolutionNPhase * self.nav_resolution_defactor), acceleration_factor
+        )
+        pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
+        # in general only nth of resolution
         block_fid_nav = [kernels.Kernel.acquisition_fid_nav(
             params=self.params,
             system=self.system,
             line_num=k,
-            reso_degrading=resolution_defactor
-        ) for k in range(int(self.params.resolutionNPhase * resolution_defactor / 2))]
+            reso_degrading=self.nav_resolution_defactor
+        ) for k in range(int(self.params.resolutionNPhase * self.nav_resolution_defactor / 2))]
         # add spoiling
         block_fid_nav.append(self.block_spoil_end)
         # add delay
         block_fid_nav.append(kernels.Kernel(system=self.system, delay=events.DELAY.make_delay(delay=10e-3)))
         return block_fid_nav
 
-    def _set_excitation_fid_nav(self, resolution_defactor: float = 1/6) -> kernels.Kernel:
+    def _set_excitation_fid_nav(self) -> kernels.Kernel:
         # use excitation kernel without spoiling
         k_ex = kernels.Kernel.excitation_slice_sel(params=self.params, system=self.system, use_slice_spoiling=False)
         # set up prephasing gradient for fid readouts
@@ -73,11 +83,11 @@ class JsTmcSequence(seq_gen.GenSequence):
         t_spoiling = np.sum(np.diff(k_ex.grad_slice.t_array_s[-4:]))
         t_spoiling_start = k_ex.grad_slice.t_array_s[-4]
         # get area
-        num_samples_per_read = int(self.params.resolutionNRead * resolution_defactor)
+        num_samples_per_read = int(self.params.resolutionNRead * self.nav_resolution_defactor)
         grad_read_area = events.GRAD.make_trapezoid(
             channel=self.params.read_dir, system=self.system,
             flat_area=num_samples_per_read * self.params.deltaK_read,
-            flat_time=self.params.dwell * num_samples_per_read
+            flat_time=self.params.dwell * num_samples_per_read * self.params.oversampling
         ).area
         # need half of this area (includes ramps etc)
         grad_read_pre = events.GRAD.make_trapezoid(
@@ -127,7 +137,7 @@ class JsTmcSequence(seq_gen.GenSequence):
         ) + np.sum(
             [b.get_duration() for b in self.block_list_fid_nav_acq[:-1]]
         )
-        logModule.info(f"\t\t-total fid-nav time (2 navs + 1 delay of 10ms): {t_total_fid_nav*1e3:.2f} ms")
+        logModule.info(f"\t\t-total fid-nav time (2 navs + 1 delay of 10ms): {t_total_fid_nav * 1e3:.2f} ms")
         # deminish TR by FIDnavs
         tr_eff = self.params.TR * 1e-3 - t_total_fid_nav
         max_num_slices = int(np.floor(tr_eff / t_total_etl))
@@ -146,10 +156,6 @@ class JsTmcSequence(seq_gen.GenSequence):
             self.delay_slice.set_on_block_raster()
             logModule.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
 
-    def _calculate_scan_time(self):
-        t_total = self.params.TR * 1e-3 * (self.params.numberOfCentralLines + self.params.numberOfOuterLines)
-        logModule.info(f"\t\t-total scan time: {t_total / 60:.1f} min ({t_total:.1f} s)")
-
     def build(self):
         logModule.info(f"__Build Sequence__")
         logModule.info(f"build -- calculate minimum ESP")
@@ -164,24 +170,49 @@ class JsTmcSequence(seq_gen.GenSequence):
         self._set_delta_slices()
         logModule.info(f"build -- loop lines")
         self._loop_lines()
+        self._set_seq_info()
+
+    def _set_seq_info(self):
+        self.sampling_pattern = pd.DataFrame(self.sampling_pattern_constr)
+        self.sequence_info = {
+            "IMG_N_read": self.params.resolutionNRead,
+            "IMG_N_phase": self.params.resolutionNPhase,
+            "IMG_N_slice": self.params.resolutionNumSlices,
+            "IMG_resolution_read": self.params.resolutionVoxelSizeRead,
+            "IMG_resolution_phase": self.params.resolutionVoxelSizePhase,
+            "IMG_resolution_slice": self.params.resolutionSliceThickness,
+            "NAV_N_read": int(self.params.resolutionNRead * self.nav_resolution_defactor),
+            "NAV_N_phase": int(self.params.resolutionNPhase * self.nav_resolution_defactor),
+            "NAV_N_slice": self.nav_num,
+            "NAV_resolution_read": self.params.resolutionVoxelSizeRead / self.nav_resolution_defactor,
+            "NAV_resolution_phase": self.params.resolutionVoxelSizePhase / self.nav_resolution_defactor,
+            "NAV_resolution_slice": self.params.resolutionSliceThickness,
+            "NAV_resolution_scaling": self.nav_resolution_defactor,
+            "ETL": self.params.ETL,
+            "Num_Navs": self.params.numberOfCentralLines + self.params.numberOfOuterLines,
+            "Num_lines_per_nav": int(self.params.resolutionNPhase * self.nav_resolution_defactor / 2),
+            "NAV_acc_factor": 2,
+            "OS_factor": self.params.oversampling,
+            "READ_dir": self.params.read_dir
+        }
 
     def _write_sampling_pattern(self, echo_idx: int, phase_idx: int, slice_idx: int,
-                                nav_idx: int = -1, nav_type: bool = False, nav_line: int = None):
-        if nav_idx > -1:
-            # we have a navigator
-            sampling_index = {"pe_num": -1, "slice_num": -1,
-                              "echo_num": -1, "nav_num": nav_idx, "nav_id": int(nav_type), "nav_line": nav_line}
-        else:
-            pe_num = self.k_indexes[echo_idx, phase_idx]
-            sampling_index = {"pe_num": pe_num, "slice_num": int(self.trueSliceNum[slice_idx]),
-                              "echo_num": echo_idx, "nav_num": -1, " nav_type": -1, " nav_line": nav_line}
-        self.sampling_pattern.append(sampling_index)
+                                num_scan: int = -1, nav_flag: bool = False, nav_dir: int = 0):
+        sampling_index = {
+            "num_scan": num_scan, "navigator": nav_flag,
+            "slice_num": slice_idx, "pe_num": phase_idx, "echo_num": echo_idx, "nav_dir": nav_dir
+        }
+        self.sampling_pattern_constr.append(sampling_index)
+        self.sampling_pattern_set = True
+        return num_scan + 1
 
     def _loop_lines(self):
         # through phase encodes
         line_bar = tqdm.trange(
             self.params.numberOfCentralLines + self.params.numberOfOuterLines, desc="phase encodes"
         )
+        # counter for number of scan
+        scan_idx = 0
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             for idx_slice in range(self.params.resolutionNumSlices):
                 # looping through slices per phase encode
@@ -209,7 +240,11 @@ class JsTmcSequence(seq_gen.GenSequence):
                 # adc
                 self.seq.ppSeq.add_block(*self.block_acquisition.list_events_to_ns())
                 # write sampling pattern
-                self._write_sampling_pattern(phase_idx=idx_n, echo_idx=0, slice_idx=idx_slice)
+                scan_idx = self._write_sampling_pattern(
+                    phase_idx=self.k_indexes[0, idx_n], echo_idx=0, slice_idx=self.trueSliceNum[idx_slice],
+                    num_scan=scan_idx, nav_flag=False
+                )
+
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
                     self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
@@ -231,7 +266,10 @@ class JsTmcSequence(seq_gen.GenSequence):
                     # adc
                     self.seq.ppSeq.add_block(*self.block_acquisition.list_events_to_ns())
                     # write sampling pattern
-                    self._write_sampling_pattern(echo_idx=echo_idx, phase_idx=idx_n, slice_idx=idx_slice)
+                    scan_idx = self._write_sampling_pattern(
+                        echo_idx=echo_idx, phase_idx=self.k_indexes[echo_idx, idx_n],
+                        slice_idx=self.trueSliceNum[idx_slice], num_scan=scan_idx, nav_flag=False
+                    )
 
                     # delay if necessary
                     if self.delay_ref_adc.get_duration() > 1e-7:
@@ -241,27 +279,39 @@ class JsTmcSequence(seq_gen.GenSequence):
                 self.seq.ppSeq.add_block(*self.block_spoil_end.list_events_to_ns())
                 # insert slice delay
                 self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
-            for nav_idx in range(2):
+
+            # navigators
+            for nav_idx in range(self.nav_num):
                 self._apply_slice_offset_fid_nav(idx_nav=nav_idx)
                 # excitation
                 # add block
                 self.seq.ppSeq.add_block(*self.block_excitation_nav.list_events_to_ns())
                 # epi style nav read
+                # we set up a counter to track the phase encode line, k-space center is half of num lines
                 line_counter = 0
-                pe_increments = np.arange(1, int(self.params.resolutionNPhase / 6), 2)
+                central_line = int(self.params.resolutionNPhase * self.nav_resolution_defactor / 2) - 1
+                # we set up the pahse encode increments
+                pe_increments = np.arange(1, int(self.params.resolutionNPhase * self.nav_resolution_defactor), 2)
                 pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
+                # we loop through all fid nav blocks (whole readout)
                 for b_idx in range(self.block_list_fid_nav_acq.__len__()):
+                    # get the block
                     b = self.block_list_fid_nav_acq[b_idx]
-                    # in the end we add a delay
+                    # if at the end we add a delay
                     if (nav_idx == 1) & (b_idx == self.block_list_fid_nav_acq.__len__() - 1):
                         self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
                     # otherwise we add the block
                     else:
                         self.seq.ppSeq.add_block(*b.list_events_to_ns())
+                    # if we have a readout we write to sampling pattern file
                     if b.adc.get_duration() > 0:
-                        nav_line_pe = np.sum(pe_increments[:line_counter])
-                        self._write_sampling_pattern(echo_idx=-1, phase_idx=-1, slice_idx=-1,
-                                                     nav_idx=idx_n, nav_type=bool(nav_idx), nav_line=int(nav_line_pe))
+                        nav_read_dir = np.sign(b.grad_read.amplitude[1])
+                        # track which line we are writing from the incremental steps
+                        nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
+                        scan_idx = self._write_sampling_pattern(
+                            echo_idx=-1, phase_idx=nav_line_pe, slice_idx=nav_idx, num_scan=scan_idx, nav_flag=True,
+                            nav_dir=nav_read_dir
+                            )
                         line_counter += 1
 
         logModule.info(f"sequence built!")
@@ -337,67 +387,11 @@ class JsTmcSequence(seq_gen.GenSequence):
         # To merge both: given phase parameter and any complex signal array data
         sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
 
-    def _set_delta_slices(self):
-        # multi-slice
-        numSlices = self.params.resolutionNumSlices
-        # cast from mm
-        delta_z = self.params.z_extend * 1e-3
-        if self.params.interleavedAcquisition:
-            logModule.info("\t\t-set interleaved acquisition")
-            # want to go through the slices alternating from beginning and middle
-            self.z.flat[:numSlices] = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
-            # reshuffle slices mid+1, 1, mid+2, 2, ...
-            self.z = self.z.transpose().flatten()[:numSlices]
-        else:
-            logModule.info("\t\t-set sequential acquisition")
-            self.z = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
-        # find reshuffled slice numbers
-        for idx_slice_num in range(numSlices):
-            z_val = self.z[idx_slice_num]
-            z_pos = np.where(np.unique(self.z) == z_val)[0][0]
-            self.trueSliceNum[idx_slice_num] = z_pos
-
-    def _set_k_space(self):
-        if self.params.accelerationFactor > 1.1:
-            # calculate center of k space and indexes for full sampling band
-            k_central_phase = round(self.params.resolutionNPhase / 2)
-            k_half_central_lines = round(self.params.numberOfCentralLines / 2)
-            # set indexes for start and end of full k space center sampling
-            k_start = k_central_phase - k_half_central_lines
-            k_end = k_central_phase + k_half_central_lines
-
-            # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
-            # Trying random sampling, ie. pick random line numbers for remaining indices,
-            # we dont want to pick the same positive as negative phase encodes to account
-            # for conjugate symmetry in k-space.
-            # Hence, we pick from the positive indexes twice (thinking of the center as 0) without allowing for duplexes
-            # and negate half the picks
-            # calculate indexes
-            k_remaining = np.arange(0, k_start)
-            # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
-            weighting_factor = np.clip(self.params.sampleWeighting, 0.01, 1)
-            if weighting_factor > 0.05:
-                logModule.info(f"\t\t-weighted random sampling of k-space phase encodes, factor: {weighting_factor}")
-            # random encodes for different echoes - random choice weighted towards center
-            weighting = np.clip(np.power(np.linspace(0, 1, k_start), weighting_factor), 1e-5, 1)
-            weighting /= np.sum(weighting)
-            for idx_echo in range(self.params.ETL):
-                # same encode for all echoes -> central lines
-                self.k_indexes[idx_echo, :self.params.numberOfCentralLines] = np.arange(k_start, k_end)
-
-                k_indices = np.random.choice(
-                    k_remaining,
-                    size=self.params.numberOfOuterLines,
-                    replace=False,
-                    p=weighting
-
-                )
-                k_indices[::2] = self.params.resolutionNPhase - 1 - k_indices[::2]
-                self.k_indexes[idx_echo, self.params.numberOfCentralLines:] = np.sort(k_indices)
-        else:
-            self.k_indexes[:, :] = np.arange(self.params.numberOfCentralLines + self.params.numberOfOuterLines)
-
     def get_emc_info(self) -> dict:
+        # ToDo -> set up for vespa-gerd
+        t_rephase = (self.block_excitation.get_duration() -
+                     (self.block_excitation.rf.t_duration_s + self.block_excitation.rf.t_delay_s))
+        amp_rephase = self.block_excitation.grad_slice.area[-1] / t_rephase
         emc_dict = {
             "gammaHz": self.seq.specs.gamma,
             "ETL": self.params.ETL,
@@ -408,8 +402,8 @@ class JsTmcSequence(seq_gen.GenSequence):
             "excitationPhase": self.params.excitationRfPhase,
             "gradientExcitation": self._set_grad_for_emc(self.block_excitation.grad_slice.slice_select_amplitude),
             "durationExcitation": self.params.excitationDuration,
-            "gradientExcitationRephase": self._set_grad_for_emc(self.block_excitation.grad_slice.amplitude[-2]),
-            "durationExcitationRephase": np.sum(np.diff(self.block_excitation.grad_slice.t_array_s[-4:])) * 1e6,
+            "gradientExcitationRephase": self._set_grad_for_emc(amp_rephase),
+            "durationExcitationRephase": t_rephase * 1e6,
             "gradientExcitationVerse1": 0.0,
             "gradientExcitationVerse2": 0.0,
             "durationExcitationVerse1": 0.0,
@@ -426,11 +420,6 @@ class JsTmcSequence(seq_gen.GenSequence):
             "durationRefocusVerse2": 0.0
         }
         return emc_dict
-
-    def get_pulse_amplitudes(self) -> np.ndarray:
-        exc_pulse = self.block_excitation.rf.signal
-        return exc_pulse
-
 
 
 if __name__ == '__main__':
