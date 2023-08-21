@@ -1,4 +1,4 @@
-from jstmc import options, seq_v_jstmc, sar, utils
+from jstmc import options, seq_v_jstmc, seq_v_vespa, sar, utils
 from rf_pulse_files.rfpf import RF
 import numpy as np
 import logging
@@ -13,23 +13,32 @@ def main():
     logging.basicConfig(format='%(asctime)s %(levelname)s :: %(name)s -- %(message)s',
                         datefmt='%I:%M:%S', level=logging.INFO)
     logging.info("Starting sequence build")
+    # build seq object from parsed args
     seq = options.Sequence.from_cmd_args(prog_args)
+    # check if save path available
     seq.check_output_path()
 
-    jstmc_algo = seq_v_jstmc.JsTmcSequence(seq_opts=seq)
+    # setup sequence algorithm
+    # jstmc_algo = seq_v_jstmc.JsTmcSequence(seq_opts=seq)
+    jstmc_algo = seq_v_vespa.VespaGerdSequence(seq_opts=seq)
+    # build sequence
     jstmc_algo.build()
+
+    # get emc_info
     emc_info = jstmc_algo.get_emc_info()
+    # get slice info
     z = jstmc_algo.get_z()
+    # get sampling pattern
     sampling_pattern = jstmc_algo.get_sampling_pattern()
-    pulse = jstmc_algo.get_pulse_amplitudes()
+    # get pulse info
+    pulse = jstmc_algo.get_pulse_rfpf()
+    # get sequence info for recon
+    seq_info = jstmc_algo.get_sequence_info()
+    # get seq object
     seq = jstmc_algo.get_seq()
-    seq.write_sampling_pattern(sampling_pattern=sampling_pattern)
 
     scan_time = np.sum(seq.ppSeq.block_durations)
-    logging.info(f"Total Scan Time: {scan_time / 60:.1f} min")
-
-    logging.info(f"SAR calculations")
-    sar.calc_sar(seq=seq, visualize=seq.config.visualize)
+    logging.info(f"Total Scan Time Sum Seq File: {scan_time / 60:.1f} min")
 
     logging.info("Verifying and Writing Files")
     # verifying
@@ -43,17 +52,18 @@ def main():
             for err_rep_item in err_rep:
                 w_file.write(f"{str(err_rep_item)}\n")
 
-    seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern, pulse_signal=pulse)
+    # saving details
+    seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern, pulse_signal=pulse, sequence_info=seq_info)
     logging.info(f".seq set definitions: {seq.ppSeq.definitions}")
 
     if seq.config.visualize:
         logging.info("Plotting")
         # give z and slice thickness both with same units. here mm
         utils.plot_slice_acquisition(z*1e3, seq.params.resolutionSliceThickness)
-        utils.plot_sampling_pattern(sampling_pattern, seq_vars=seq)
-        path = Path("test/images").absolute()
+        # utils.plot_sampling_pattern(sampling_pattern, seq_vars=seq)
 
-        utils.pretty_plot_et(seq, t_start=1e3 * scan_time / 2 - 2 * seq.params.TR)  # , save=path.joinpath("echo_train.png"))
+        utils.pretty_plot_et(seq, t_start=1e3 * scan_time / 2 - 2 * seq.params.TR,
+                             save=Path(options.Sequence.config.outputPath).absolute().joinpath("echo_train_semc"))
 
         seq.ppSeq.plot(time_range=(0, 2e-3 * seq.params.TR), time_disp='s')
         # seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
