@@ -405,7 +405,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
         self.seq.ppSeq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern(
-            phase_idx=self.k_indexes[0, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
+            phase_idx=self.k_indexes[echo_se_idx, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
             slice_idx=self.trueSliceNum[idx_slice_loop], num_scan=scan_idx,
             se_gre_type="gre", se_gre_num=echo_gre_idx
         )
@@ -414,7 +414,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
         self.seq.ppSeq.add_block(*self.block_se_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_se_idx = self._write_sampling_pattern(
-            phase_idx=self.k_indexes[0, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
+            phase_idx=self.k_indexes[echo_se_idx, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
             slice_idx=self.trueSliceNum[idx_slice_loop], num_scan=scan_idx,
             se_gre_type="se", se_gre_num=echo_se_idx
         )
@@ -423,7 +423,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
         self.seq.ppSeq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern(
-            phase_idx=self.k_indexes[0, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
+            phase_idx=self.k_indexes[echo_se_idx, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
             slice_idx=self.trueSliceNum[idx_slice_loop], num_scan=scan_idx,
             se_gre_type="gre", se_gre_num=echo_gre_idx
         )
