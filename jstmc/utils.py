@@ -54,11 +54,11 @@ def pretty_plot_et(seq: options.Sequence,
     # find starting idx
     start_idx = 0
     t_cum = 0
-    for block_idx in range(len(seq.ppSeq.block_durations)):
-        t_cum += 1e6 * seq.ppSeq.block_durations[block_idx]
+    for block_idx in range(len(seq.pp_seq.block_durations)):
+        t_cum += 1e6 * seq.pp_seq.block_durations[block_idx]
         if t_cum > t_start:
             start_idx = block_idx
-            block = seq.ppSeq.get_block(block_idx + 1)
+            block = seq.pp_seq.get_block(block_idx + 1)
             # check if we found excitation pulse, ie. start of echo train
             if getattr(block, "rf") is not None:
                 if block.rf.use == "excitation":
@@ -66,10 +66,10 @@ def pretty_plot_et(seq: options.Sequence,
                     break
     t_start = t_cum
     t_cum = 0
-    for block_idx in np.arange(start_idx, len(seq.ppSeq.block_durations)):
+    for block_idx in np.arange(start_idx, len(seq.pp_seq.block_durations)):
         t0 = t_cum
-        block = seq.ppSeq.get_block(block_idx + 1)
-        if t_cum + 1e6 * seq.ppSeq.block_durations[block_idx] > t_total:
+        block = seq.pp_seq.get_block(block_idx + 1)
+        if t_cum + 1e6 * seq.pp_seq.block_durations[block_idx] > t_total:
             break
 
         if getattr(block, 'rf') is not None:
@@ -245,7 +245,7 @@ if __name__ == '__main__':
         "D:\\Daten\\01_Work\\11_owncloud\\ds_mese_cbs_js\\97_pulseq\\sequence\\seq_1a_fa180_fov_210-166-10_RL\\jstmc1a_fa180_fov210-165-14_RL.seq"
     ).absolute()
     seq = options.Sequence.load(seq_path)
-    scan_time = np.sum(seq.ppSeq.block_durations)
+    scan_time = np.sum(seq.pp_seq.block_durations)
     pretty_plot_et(seq, plot_blips=True, t_start=0, figsize=(10, 5))
 
 

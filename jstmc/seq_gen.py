@@ -1,5 +1,4 @@
 import pandas as pd
-from rf_pulse_files import rfpf
 from jstmc import options, kernels
 import numpy as np
 import logging
@@ -9,8 +8,8 @@ log_module = logging.getLogger(__name__)
 class GenSequence:
     def __init__(self, seq_opts: options.Sequence):
         self.seq = seq_opts
-        self.params = seq_opts.params
-        self.system = seq_opts.ppSys
+        self.params = seq_opts.params.pypulseq
+        self.system = seq_opts.pp_sys
 
         # phase grads
         self.phase_areas: np.ndarray = (- np.arange(self.params.resolutionNPhase) +
@@ -37,26 +36,14 @@ class GenSequence:
         self.prng = np.random.RandomState(0)
 
     def get_pypulseq_seq(self):
-        return self.seq.ppSeq
+        return self.seq.pp_seq
 
     def get_seq(self):
         return self.seq
 
     def _set_grad_for_emc(self, grad):
-        return 1e3 / self.seq.specs.gamma * grad
+        return 1e3 / self.seq.params.specs.gamma * grad
 
-    def get_emc_info(self) -> dict:
-        return NotImplemented
-
-    def get_sampling_pattern(self) -> pd.DataFrame:
-        if not self.sampling_pattern_set:
-            err = f"sampling pattern for sequence variant wasnt set, or flag unused"
-            log_module.error(err)
-            raise NotImplementedError(err)
-        return self.sampling_pattern
-
-    def get_sequence_info(self) -> dict:
-        return self.sequence_info
 
     def get_z(self):
         # get slice extend
@@ -126,8 +113,3 @@ class GenSequence:
             z_pos = np.where(np.unique(self.z) == z_val)[0][0]
             self.trueSliceNum[idx_slice_num] = z_pos
 
-    def get_pulse_rfpf(self) -> rfpf.RF:
-        exc_pulse = self.block_excitation.rf
-        return rfpf.RF("pyp_pulse", bandwidth_in_Hz=exc_pulse.bandwidth_hz, duration_in_us=exc_pulse.t_duration_s * 1e6,
-                       time_bandwidth=exc_pulse.time_bandwidth, num_samples=exc_pulse.signal.shape[0],
-                       amplitude=exc_pulse.signal)

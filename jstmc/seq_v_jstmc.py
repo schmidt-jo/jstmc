@@ -223,22 +223,22 @@ class JsTmcSequence(seq_gen.GenSequence):
 
                 # excitation
                 # add block
-                self.seq.ppSeq.add_block(*self.block_excitation.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_excitation.list_events_to_ns())
 
                 # delay if necessary
                 if self.delay_exci_ref1.get_duration() > 1e-7:
-                    self.seq.ppSeq.add_block(self.delay_exci_ref1.to_simple_ns())
+                    self.seq.pp_seq.add_block(self.delay_exci_ref1.to_simple_ns())
 
                 # first refocus
                 # add block
-                self.seq.ppSeq.add_block(*self.block_refocus_1.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_refocus_1.list_events_to_ns())
 
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
-                    self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
+                    self.seq.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
 
                 # adc
-                self.seq.ppSeq.add_block(*self.block_acquisition.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_acquisition.list_events_to_ns())
                 # write sampling pattern
                 scan_idx = self._write_sampling_pattern(
                     phase_idx=self.k_indexes[0, idx_n], echo_idx=0, slice_idx=self.trueSliceNum[idx_slice],
@@ -247,7 +247,7 @@ class JsTmcSequence(seq_gen.GenSequence):
 
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
-                    self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
+                    self.seq.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
 
                 # loop
                 for echo_idx in np.arange(1, self.params.ETL):
@@ -258,13 +258,13 @@ class JsTmcSequence(seq_gen.GenSequence):
                     # set slice offset
                     self._apply_slice_offset(idx_slice=idx_slice)
                     # add block
-                    self.seq.ppSeq.add_block(*self.block_refocus.list_events_to_ns())
+                    self.seq.pp_seq.add_block(*self.block_refocus.list_events_to_ns())
                     # delay if necessary
                     if self.delay_ref_adc.get_duration() > 1e-7:
-                        self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
+                        self.seq.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
 
                     # adc
-                    self.seq.ppSeq.add_block(*self.block_acquisition.list_events_to_ns())
+                    self.seq.pp_seq.add_block(*self.block_acquisition.list_events_to_ns())
                     # write sampling pattern
                     scan_idx = self._write_sampling_pattern(
                         echo_idx=echo_idx, phase_idx=self.k_indexes[echo_idx, idx_n],
@@ -273,19 +273,19 @@ class JsTmcSequence(seq_gen.GenSequence):
 
                     # delay if necessary
                     if self.delay_ref_adc.get_duration() > 1e-7:
-                        self.seq.ppSeq.add_block(self.delay_ref_adc.to_simple_ns())
+                        self.seq.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
                 # spoil end
                 self._set_end_spoil_phase_grad()
-                self.seq.ppSeq.add_block(*self.block_spoil_end.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_spoil_end.list_events_to_ns())
                 # insert slice delay
-                self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
+                self.seq.pp_seq.add_block(self.delay_slice.to_simple_ns())
 
             # navigators
             for nav_idx in range(self.nav_num):
                 self._apply_slice_offset_fid_nav(idx_nav=nav_idx)
                 # excitation
                 # add block
-                self.seq.ppSeq.add_block(*self.block_excitation_nav.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_excitation_nav.list_events_to_ns())
                 # epi style nav read
                 # we set up a counter to track the phase encode line, k-space center is half of num lines
                 line_counter = 0
@@ -299,10 +299,10 @@ class JsTmcSequence(seq_gen.GenSequence):
                     b = self.block_list_fid_nav_acq[b_idx]
                     # if at the end we add a delay
                     if (nav_idx == 1) & (b_idx == self.block_list_fid_nav_acq.__len__() - 1):
-                        self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
+                        self.seq.pp_seq.add_block(self.delay_slice.to_simple_ns())
                     # otherwise we add the block
                     else:
-                        self.seq.ppSeq.add_block(*b.list_events_to_ns())
+                        self.seq.pp_seq.add_block(*b.list_events_to_ns())
                     # if we have a readout we write to sampling pattern file
                     if b.adc.get_duration() > 0:
                         nav_read_dir = np.sign(b.grad_read.amplitude[1])

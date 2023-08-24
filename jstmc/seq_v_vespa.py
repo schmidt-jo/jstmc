@@ -67,13 +67,13 @@ class VespaGerdSequence(seq_gen.GenSequence):
         self._mod_block_prewind_echo_read(self.block_refocus)
 
         # plot files for visualization
-        if self.seq.config.visualize:
-            self.block_excitation.plot(path=self.seq.config.outputPath, name="excitation")
-            self.block_refocus_first.plot(path=self.seq.config.outputPath, name="refocus-first")
-            self.block_refocus.plot(path=self.seq.config.outputPath, name="refocus")
-            self.block_pf_acquisition.plot(path=self.seq.config.outputPath, name="partial-fourier-acqusisition")
-            self.block_se_acq.plot(path=self.seq.config.outputPath, name="undersampled-acquisition")
-            self.block_gre_acq.plot(path=self.seq.config.outputPath, name="undersampled-gre-acq")
+        if self.seq.params.pypulseq.visualize:
+            self.block_excitation.plot(path=self.seq.params.config.output_path, name="excitation")
+            self.block_refocus_first.plot(path=self.seq.params.config.output_path, name="refocus-first")
+            self.block_refocus.plot(path=self.seq.params.config.output_path, name="refocus")
+            self.block_pf_acquisition.plot(path=self.seq.params.config.output_path, name="partial-fourier-acqusisition")
+            self.block_se_acq.plot(path=self.seq.params.config.output_path, name="undersampled-acquisition")
+            self.block_gre_acq.plot(path=self.seq.params.config.output_path, name="undersampled-gre-acq")
 
         # ToDo:
         # as is now all gesse readouts sample the same phase encode lines as the spin echoes.
@@ -402,7 +402,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
     def _add_gesse_readouts(self, idx_pe_loop: int, idx_slice_loop: int,
                             scan_idx: int, echo_se_idx: int, echo_gre_idx: int):
         # add gre sampling
-        self.seq.ppSeq.add_block(*self.block_gre_acq.list_events_to_ns())
+        self.seq.pp_seq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern(
             phase_idx=self.k_indexes[0, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
@@ -411,7 +411,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
         )
 
         # add se sampling
-        self.seq.ppSeq.add_block(*self.block_se_acq.list_events_to_ns())
+        self.seq.pp_seq.add_block(*self.block_se_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_se_idx = self._write_sampling_pattern(
             phase_idx=self.k_indexes[0, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
@@ -420,7 +420,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
         )
 
         # add gre sampling
-        self.seq.ppSeq.add_block(*self.block_gre_acq.list_events_to_ns())
+        self.seq.pp_seq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern(
             phase_idx=self.k_indexes[0, idx_pe_loop], echo_idx=echo_gre_idx + echo_se_idx,
@@ -446,10 +446,10 @@ class VespaGerdSequence(seq_gen.GenSequence):
                 # looping through slices per phase encode, set phase encode for excitation
                 self._set_phase_grad(phase_idx=idx_n, echo_idx=0, excitation=True)
                 # add block
-                self.seq.ppSeq.add_block(*self.block_excitation.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_excitation.list_events_to_ns())
 
                 # 0th echo sampling
-                self.seq.ppSeq.add_block(*self.block_pf_acquisition.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_pf_acquisition.list_events_to_ns())
                 # write sampling pattern
                 scan_idx, echo_gre_idx = self._write_sampling_pattern(
                     phase_idx=self.k_indexes[0, idx_n], echo_idx=echo_gre_idx + echo_se_idx,
@@ -458,7 +458,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
                 )
                 # delay if necessary
                 if self.t_delay_e0_ref1.get_duration() > 1e-7:
-                    self.seq.ppSeq.add_block(self.t_delay_e0_ref1.to_simple_ns())
+                    self.seq.pp_seq.add_block(self.t_delay_e0_ref1.to_simple_ns())
 
                 # -- first refocus --
                 # set flip angle from param list
@@ -466,11 +466,11 @@ class VespaGerdSequence(seq_gen.GenSequence):
                 # looping through slices per phase encode, set phase encode for ref 1
                 self._set_phase_grad(phase_idx=idx_n, echo_idx=0)
                 # add block
-                self.seq.ppSeq.add_block(*self.block_refocus_first.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_refocus_first.list_events_to_ns())
 
                 # delay if necessary
                 if self.t_delay_ref1_se1.get_duration() > 1e-7:
-                    self.seq.ppSeq.add_block(self.t_delay_ref1_se1.to_simple_ns())
+                    self.seq.pp_seq.add_block(self.t_delay_ref1_se1.to_simple_ns())
 
                 scan_idx, echo_se_idx, echo_gre_idx = self._add_gesse_readouts(
                     idx_pe_loop=idx_n, idx_slice_loop=idx_slice,
@@ -483,7 +483,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
                     # looping through slices per phase encode, set phase encode for ref 1
                     self._set_phase_grad(phase_idx=idx_n, echo_idx=echo_idx)
                     # refocus
-                    self.seq.ppSeq.add_block(*self.block_refocus.list_events_to_ns())
+                    self.seq.pp_seq.add_block(*self.block_refocus.list_events_to_ns())
 
                     scan_idx, echo_se_idx, echo_gre_idx = self._add_gesse_readouts(
                         idx_pe_loop=idx_n, idx_slice_loop=idx_slice,
@@ -493,9 +493,9 @@ class VespaGerdSequence(seq_gen.GenSequence):
                 # set phase encode of final spoiling grad
                 self._set_end_spoil_phase_grad()
                 # end with spoiling
-                self.seq.ppSeq.add_block(*self.block_spoil_end.list_events_to_ns())
+                self.seq.pp_seq.add_block(*self.block_spoil_end.list_events_to_ns())
                 # set slice delay
-                self.seq.ppSeq.add_block(self.delay_slice.to_simple_ns())
+                self.seq.pp_seq.add_block(self.delay_slice.to_simple_ns())
 
     def simulate_grad_moments(self):
         log_module.info(f"simulating gradient moments")
@@ -508,10 +508,10 @@ class VespaGerdSequence(seq_gen.GenSequence):
         # get gradient shapes
         grads = np.zeros((4, ax.shape[0]))  # grads [read, phase, slice, adc]
         # get seq data until defined length
-        block_times = np.cumsum(self.seq.ppSeq.block_durations)
+        block_times = np.cumsum(self.seq.pp_seq.block_durations)
         end_id = np.where(block_times >= t_lim_ms * 1e-3)[0][0]
         for block_counter in range(end_id):
-            block = self.seq.ppSeq.get_block(block_counter + 1)
+            block = self.seq.pp_seq.get_block(block_counter + 1)
             if getattr(block, "adc", None) is not None:  # ADC
                 b_adc = block.adc
                 # From Pulseq: According to the information from Klaus Scheffler and indirectly from Siemens this
@@ -529,7 +529,7 @@ class VespaGerdSequence(seq_gen.GenSequence):
                     grad_shape = np.interp(np.arange(t_end - t_start), 1e6 * grad.tt / dt_steps, grad.waveform)
                     grads[x, t_start:t_end] = grad_shape
 
-            t += int(1e6 * self.seq.ppSeq.block_durations[block_counter] / dt_steps)
+            t += int(1e6 * self.seq.pp_seq.block_durations[block_counter] / dt_steps)
 
         # want to get the moments, basically just cumsum over the grads, multiplied by delta t = 5us
         grad_moments = np.copy(grads)
@@ -570,17 +570,21 @@ class VespaGerdSequence(seq_gen.GenSequence):
 
     def _set_k_space_sampling_readout_patterns(self):
         # get all read - k - trajectories
+        # get prephasing gradient area
         grad_pre_area = np.sum(self.block_excitation.grad_read.area)
-        k_traj_pf = self.block_pf_acquisition.get_k_space_trajectory(
-            pre_read_area=grad_pre_area, fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
-        )
+        # calculate trajectory for pf readout
+        self.seq.params.sampling_k_traj.register_trajectory(
+            self.block_pf_acquisition.get_k_space_trajectory(
+                pre_read_area=grad_pre_area, fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
+            ),
+
+        # calculate trajectory for gre readout, prephasing area = to refocus block read area half
         k_traj_gre_us_sym = self.block_gre_acq.get_k_space_trajectory(
             pre_read_area=np.sum(self.block_refocus.grad_read.area) / 2,
             fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
         )
-        pre_area_se = np.sum(self.block_refocus.grad_read.area) / 2 + np.trapz(
-            x=self.block_gre_acq.grad_read.t_array_s, y=self.block_gre_acq.grad_read.amplitude
-        )
+        # calculate trajectory for se readouts, prephasing is the prephase gre area + whole gre area
+        pre_area_se = np.sum(self.block_refocus.grad_read.area) / 2 + np.sum(self.block_gre_acq.area)
         k_traj_se_us_sym = self.block_se_acq.get_k_space_trajectory(
             pre_read_area=pre_area_se,
             fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read

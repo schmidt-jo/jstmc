@@ -1,6 +1,6 @@
 name: pypulseq
 channels:
-  - defaults
+  - default_config
   - conda-forge
   - anaconda
 dependencies:

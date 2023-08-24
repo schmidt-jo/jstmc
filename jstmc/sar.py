@@ -23,7 +23,7 @@ def calc_sar(seq: typing.Union[options.Sequence, Path, str], visualize: bool = T
         path = path.with_stem(f"{path.stem}_sar_estimate")
         save_file = path.with_suffix(".png").__str__()
     elif isinstance(seq, options.Sequence):
-        seq_pass = seq.ppSeq
+        seq_pass = seq.pp_seq
         path = Path(seq.config.outputPath).absolute()
         path.mkdir(parents=True, exist_ok=True)
         save_file = path.joinpath(f"jstmc{seq.config.version}_sar_estimate.png").__str__()
