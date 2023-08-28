@@ -2,7 +2,8 @@ import copy
 import typing
 
 import pathlib as plib
-from jstmc import events, options
+from jstmc import events
+import pypsi
 import numpy as np
 import pypulseq as pp
 import logging
@@ -92,39 +93,40 @@ class Kernel:
         # hence we want to calculate the area between each step
         grad_areas_for_t_adc = np.zeros_like(grad_amp_for_t_adc)
         for amp_idx in np.arange(1, grad_areas_for_t_adc.shape[0]):
-            grad_areas_for_t_adc[amp_idx] = grad_areas_for_t_adc[amp_idx-1] + np.trapz(
-                grad_amp_for_t_adc[amp_idx-1:amp_idx+1], dx=self.adc.t_dwell_s
+            grad_areas_for_t_adc[amp_idx] = grad_areas_for_t_adc[amp_idx - 1] + np.trapz(
+                grad_amp_for_t_adc[amp_idx - 1:amp_idx + 1], dx=self.adc.t_dwell_s
             )
 
         # calculate k-positions
         k_pos = (area_pre + grad_areas_for_t_adc) / fs_grad_area
         return k_pos
 
-
     @classmethod
-    def excitation_slice_sel(cls, params: options.SequenceParameters, system: pp.Opts,
+    def excitation_slice_sel(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts,
                              use_slice_spoiling: bool = True, adjust_ramp_area: float = 0.0):
         # Excitation
         log_module.info("setup excitation")
         if use_slice_spoiling:
-            spoiling_moment = params.sliceSpoilingMoment
+            spoiling_moment = pyp_interface.sliceSpoilingMoment
         else:
             spoiling_moment = 2e-7
-        if params.extRfExc:
-            log_module.info(f"rf -- loading rfpf from file: {params.extRfExc}")
+        if pyp_interface.extRfExc:
+            log_module.info(f"rf -- loading rfpf from file: {pyp_interface.extRfExc}")
             rf = events.RF.load_from_rfpf(
-                fname=params.extRfExc, flip_angle_rad=params.excitationRadFA, phase_rad=params.excitationRadRfPhase,
-                system=system, duration_s=params.excitationDuration * 1e-6, pulse_type='excitation'
+                fname=pyp_interface.extRfExc, flip_angle_rad=pyp_interface.excitationRadFA,
+                phase_rad=pyp_interface.excitationRadRfPhase,
+                system=system, duration_s=pyp_interface.excitationDuration * 1e-6,
+                pulse_type='excitation'
             )
         else:
             log_module.info(f"rf -- build gauss pulse")
-            time_bw_prod = params.excitationTimeBwProd
+            time_bw_prod = pyp_interface.excitationTimeBwProd
             rf = events.RF.make_gauss_pulse(
-                flip_angle_rad=params.excitationRadFA,
-                phase_rad=params.excitationRadRfPhase,
+                flip_angle_rad=pyp_interface.excitationRadFA,
+                phase_rad=pyp_interface.excitationRadRfPhase,
                 pulse_type="excitation",
                 delay_s=0.0,
-                duration_s=params.excitationDuration * 1e-6,
+                duration_s=pyp_interface.excitationDuration * 1e-6,
                 time_bw_prod=time_bw_prod,
                 freq_offset_hz=0.0, phase_offset_rad=0.0,
                 system=system
@@ -133,12 +135,12 @@ class Kernel:
 
         grad_slice, grad_slice_delay, _ = events.GRAD.make_slice_selective(
             pulse_bandwidth_hz=-rf.bandwidth_hz,
-            slice_thickness_m=params.resolutionSliceThickness * 1e-3,
-            duration_s=params.excitationDuration * 1e-6,
+            slice_thickness_m=pyp_interface.resolutionSliceThickness * 1e-3,
+            duration_s=pyp_interface.excitationDuration * 1e-6,
             system=system,
-            pre_moment=-params.excitationPreMoment,
+            pre_moment=-pyp_interface.excitationPreMoment,
             re_spoil_moment=-spoiling_moment,
-            rephase=params.excitationRephaseFactor,
+            rephase=pyp_interface.excitationRephaseFactor,
             adjust_ramp_area=adjust_ramp_area
         )
         # adjust start of rf
@@ -152,22 +154,22 @@ class Kernel:
         return cls(rf=rf, grad_slice=grad_slice)
 
     @classmethod
-    def refocus_slice_sel_spoil(cls, params: options.SequenceParameters, system: pp.Opts,
+    def refocus_slice_sel_spoil(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts,
                                 pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
         # calculate read gradient in order to use correct area (corrected for ramps
-        acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime)
+        acquisition_window = set_on_grad_raster_time(system=system, time=pyp_interface.acquisitionTime)
         grad_read = events.GRAD.make_trapezoid(
-            channel=params.read_dir, system=system,
-            flat_area=params.deltaK_read * params.resolutionNRead, flat_time=acquisition_window
+            channel=pyp_interface.read_dir, system=system,
+            flat_area=pyp_interface.deltaK_read * pyp_interface.resolutionNRead, flat_time=acquisition_window
         )
         # block is first refocusing + spoiling + phase encode
         log_module.info(f"setup refocus {pulse_num + 1}")
         # set up longest phase encode
-        phase_grad_areas = (- np.arange(params.resolutionNPhase) + params.resolutionNPhase / 2) * \
-                           params.deltaK_phase
+        phase_grad_areas = (- np.arange(pyp_interface.resolutionNPhase) + pyp_interface.resolutionNPhase / 2) * \
+                           pyp_interface.deltaK_phase
         # build longest phase gradient
         grad_phase = events.GRAD.make_trapezoid(
-            channel=params.phase_dir,
+            channel=pyp_interface.phase_dir,
             area=np.max(phase_grad_areas),
             system=system
         )
@@ -177,7 +179,7 @@ class Kernel:
 
         # build read spoiler
         grad_prewind_read = events.GRAD.make_trapezoid(
-            channel=params.read_dir,
+            channel=pyp_interface.read_dir,
             area=1 / 2 * grad_read.area,
             system=system,
         )
@@ -186,36 +188,36 @@ class Kernel:
 
         duration_min = np.max([duration_phase_grad, duration_pre_read, duration_spoiler])
 
-        if params.extRfRef:
-            log_module.info(f"rf -- loading rfpf from file {params.extRfRef}")
+        if pyp_interface.extRfRef:
+            log_module.info(f"rf -- loading rfpf from file {pyp_interface.extRfRef}")
             rf = events.RF.load_from_rfpf(
-                fname=params.extRfRef, system=system,
-                duration_s=params.refocusingDuration * 1e-6, flip_angle_rad=np.pi,
+                fname=pyp_interface.extRfRef, system=system,
+                duration_s=pyp_interface.refocusingDuration * 1e-6, flip_angle_rad=np.pi,
                 phase_rad=0.0, pulse_type='refocusing'
             )
         else:
             log_module.info(f"rf -- build sync pulse")
             rf = events.RF.make_gauss_pulse(
-                flip_angle_rad=params.refocusingRadFA[pulse_num],
-                phase_rad=params.refocusingRadRfPhase[pulse_num],
+                flip_angle_rad=pyp_interface.refocusingRadFA[pulse_num],
+                phase_rad=pyp_interface.refocusingRadRfPhase[pulse_num],
                 pulse_type="refocusing",
                 delay_s=0.0,
-                duration_s=params.refocusingDuration * 1e-6,
-                time_bw_prod=params.excitationTimeBwProd,
+                duration_s=pyp_interface.refocusingDuration * 1e-6,
+                time_bw_prod=pyp_interface.excitationTimeBwProd,
                 freq_offset_hz=0.0, phase_offset_rad=0.0,
                 system=system
             )
         if pulse_num == 0:
             pre_moment = 0.0
         else:
-            pre_moment = params.sliceSpoilingMoment
+            pre_moment = pyp_interface.sliceSpoilingMoment
         grad_slice, grad_slice_delay, grad_slice_spoil_re_time = events.GRAD.make_slice_selective(
             pulse_bandwidth_hz=-rf.bandwidth_hz,
-            slice_thickness_m=params.refocusingScaleSliceGrad * params.resolutionSliceThickness * 1e-3,
-            duration_s=params.refocusingDuration * 1e-6,
+            slice_thickness_m=pyp_interface.refocusingScaleSliceGrad * pyp_interface.resolutionSliceThickness * 1e-3,
+            duration_s=pyp_interface.refocusingDuration * 1e-6,
             system=system,
             pre_moment=-pre_moment,
-            re_spoil_moment=-params.sliceSpoilingMoment,
+            re_spoil_moment=-pyp_interface.sliceSpoilingMoment,
             t_minimum_re_grad=duration_min
         )
         if duration_min < grad_slice_spoil_re_time:
@@ -231,22 +233,23 @@ class Kernel:
             # duration between - rather take middle part of slice select, rf duration on different raster possible
             t_duration_between = grad_slice.set_on_raster(grad_slice.slice_select_duration)
             grad_phase = events.GRAD.sym_grad(
-                system=system, channel=params.phase_dir, area_lobe=np.max(phase_grad_areas),
+                system=system, channel=pyp_interface.phase_dir, area_lobe=np.max(phase_grad_areas),
                 duration_lobe=duration_phase_grad, duration_between=t_duration_between, reverse_second_lobe=True
             )
             grad_read_prewind = events.GRAD.sym_grad(
-                system=system, channel=params.read_dir, area_lobe=- grad_read.area / 2, duration_lobe=duration_pre_read,
+                system=system, channel=pyp_interface.read_dir, area_lobe=- grad_read.area / 2,
+                duration_lobe=duration_pre_read,
                 duration_between=rf.t_duration_s
             )
         else:
             grad_read_prewind = events.GRAD.make_trapezoid(
-                channel=params.read_dir,
+                channel=pyp_interface.read_dir,
                 area=- grad_read.area / 2,
                 duration_s=duration_pre_read,  # given in [s] via options
                 system=system,
             )
             grad_phase = events.GRAD.make_trapezoid(
-                channel=params.phase_dir,
+                channel=pyp_interface.phase_dir,
                 area=np.max(phase_grad_areas),
                 system=system,
                 duration_s=duration_phase_grad
@@ -268,19 +271,21 @@ class Kernel:
             return _instance
 
     @classmethod
-    def acquisition_fs(cls, params: options.SequenceParameters, system: pp.Opts):
+    def acquisition_fs(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts):
         # block : adc + read grad
         log_module.info("setup acquisition")
-        acquisition_window = set_on_grad_raster_time(system=system, time=params.acquisitionTime + system.adc_dead_time)
+        acquisition_window = set_on_grad_raster_time(
+            system=system, time=pyp_interface.acquisitionTime + system.adc_dead_time
+        )
         grad_read = events.GRAD.make_trapezoid(
-            channel=params.read_dir,
-            flat_area=params.deltaK_read * params.resolutionNRead,
+            channel=pyp_interface.read_dir,
+            flat_area=pyp_interface.deltaK_read * pyp_interface.resolutionNRead,
             flat_time=acquisition_window,  # given in [s] via options
             system=system
         )
         adc = events.ADC.make_adc(
-            num_samples=int(params.resolutionNRead * params.oversampling),
-            dwell=params.dwell,
+            num_samples=int(pyp_interface.resolutionNRead * pyp_interface.oversampling),
+            dwell=pyp_interface.dwell,
             system=system
         )
         delay = (grad_read.get_duration() - adc.get_duration()) / 2
@@ -293,36 +298,36 @@ class Kernel:
         return cls(adc=adc, grad_read=grad_read)
 
     @classmethod
-    def acquisition_fid_nav(cls, params: options.SequenceParameters, system: pp.Opts,
+    def acquisition_fid_nav(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts,
                             line_num: int, reso_degrading: float = 1 / 6):
         if line_num == 0:
             log_module.info("setup FID Navigator")
         # want 1/6th  of resolution of original image (i.e. if 0.7mm iso in read direction, we get 3.5 mm resolution)
         # hence we need only 1/6th of the number of points with same delta k, want this to be divisible by 2
         # (center half line inclusion out)
-        num_samples_per_read = int(params.resolutionNRead * reso_degrading)
-        pe_increments = np.arange(1, int(params.resolutionNPhase * reso_degrading), 2)
+        num_samples_per_read = int(pyp_interface.resolutionNRead * reso_degrading)
+        pe_increments = np.arange(1, int(pyp_interface.resolutionNPhase * reso_degrading), 2)
         pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
         # we step by those increments dependent on line number
         grad_phase = events.GRAD.make_trapezoid(
-            channel=params.phase_dir,
-            area=params.deltaK_phase * pe_increments[line_num],
+            channel=pyp_interface.phase_dir,
+            area=pyp_interface.deltaK_phase * pe_increments[line_num],
             system=system
         )
         acquisition_window = set_on_grad_raster_time(
             system=system,
-            time=params.dwell * num_samples_per_read * params.oversampling + system.adc_dead_time
+            time=pyp_interface.dwell * num_samples_per_read * pyp_interface.oversampling + system.adc_dead_time
         )
         log_module.debug(f" pe line: {np.sum(pe_increments[:line_num])}")
         grad_read = events.GRAD.make_trapezoid(
-            channel=params.read_dir,
-            flat_area=np.power(-1, line_num) * params.deltaK_read * num_samples_per_read,
+            channel=pyp_interface.read_dir,
+            flat_area=np.power(-1, line_num) * pyp_interface.deltaK_read * num_samples_per_read,
             flat_time=acquisition_window,  # given in [s] via options
             system=system
         )
         adc = events.ADC.make_adc(
-            num_samples=int(num_samples_per_read * params.oversampling),
-            dwell=params.dwell,
+            num_samples=int(num_samples_per_read * pyp_interface.oversampling),
+            dwell=pyp_interface.dwell,
             system=system
         )
         delay = (grad_read.get_duration() - adc.get_duration()) / 2
@@ -337,7 +342,7 @@ class Kernel:
         return cls(adc=adc, grad_read=grad_read, grad_phase=grad_phase)
 
     @classmethod
-    def acquisition_pf_undersampled(cls, params: options.SequenceParameters, system: pp.Opts):
+    def acquisition_pf_undersampled(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts):
         # block : adc + read grad
         log_module.info("setup acquisition w undersampling partial fourier read")
         pf_factor = 0.75
@@ -345,22 +350,22 @@ class Kernel:
         # the first half is omitted
         # ToDo: make this a parameter in settings
         log_module.info(f"partial fourier for 0th echo, factor: {pf_factor:.2f}")
-        num_acq_pts = int(pf_factor * params.resolutionNRead)
+        num_acq_pts = int(pf_factor * pyp_interface.resolutionNRead)
         # set acquisition time on raster
         acq_time_fs = set_on_grad_raster_time(
-            system=system, time=params.dwell * num_acq_pts * params.oversampling
+            system=system, time=pyp_interface.dwell * num_acq_pts * pyp_interface.oversampling
         )
         # we take the usual full sampling
         grad_read_fs = events.GRAD.make_trapezoid(
-            channel=params.read_dir, system=system,
-            flat_area=params.deltaK_read * num_acq_pts, flat_time=acq_time_fs
+            channel=pyp_interface.read_dir, system=system,
+            flat_area=pyp_interface.deltaK_read * num_acq_pts, flat_time=acq_time_fs
         )
         area_ramp = grad_read_fs.amplitude[1] * grad_read_fs.t_array_s[1] * 0.5
         area_pre_read = (1 - 0.5 / pf_factor) * grad_read_fs.flat_area + area_ramp
 
         adc = events.ADC.make_adc(
-            system=system, num_samples=int(num_acq_pts * params.oversampling),
-            delay_s=grad_read_fs.t_array_s[1], dwell=params.dwell
+            system=system, num_samples=int(num_acq_pts * pyp_interface.oversampling),
+            delay_s=grad_read_fs.t_array_s[1], dwell=pyp_interface.dwell
         )
         acq_block = cls()
         acq_block.grad_read = grad_read_fs
@@ -373,12 +378,12 @@ class Kernel:
         return acq_block, area_pre_read
 
     @classmethod
-    def acquisition_sym_undersampled(cls, params: options.SequenceParameters, system: pp.Opts,
+    def acquisition_sym_undersampled(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts,
                                      invert_grad_dir: bool = False, asym_accelerated: bool = False):
         log_module.info("setup acquisition w undersampling")
         # calculate maximum acc factor -> want to keep snr -> ie bandwidth ie dwell equal and stretch read grad
         # dwell = 1 / bw / os / num_samples
-        grad_amp_fs = params.deltaK_read / params.dwell / params.oversampling
+        grad_amp_fs = pyp_interface.deltaK_read / pyp_interface.dwell / pyp_interface.oversampling
         # we want read to use max 65 % of max grad
         acc_max = 0.65 * system.max_grad / grad_amp_fs
         log_module.info(f"maximum acceleration factor: {acc_max:.2f}, rounding to lower int")
@@ -391,28 +396,29 @@ class Kernel:
         )
         # want to set it to multiples of dwell time
         # calculate how much lines we miss when ramping (including oversampling)
-        num_adc_per_ramp_os = int(np.ceil(ramp_time_between / params.dwell))
+        num_adc_per_ramp_os = int(np.ceil(ramp_time_between / pyp_interface.dwell))
         ramp_time_between = set_on_grad_raster_time(system=system,
-                                                    time=num_adc_per_ramp_os * params.dwell)
+                                                    time=num_adc_per_ramp_os * pyp_interface.dwell)
         # calculate num of outer pts (including oversampling)
         num_outer_lines_os = int(
             (
-                    params.oversampling * (params.resolutionBase - params.numberOfCentralLines) -
+                    pyp_interface.oversampling * (pyp_interface.resolutionBase - pyp_interface.numberOfCentralLines) -
                     2 * num_adc_per_ramp_os
             ) / acc_max
         )
         # total pts including lost ones plus acceleration (including oversampling)
         num_lines_total_os = int(
-            params.oversampling * params.numberOfCentralLines + 2 * num_adc_per_ramp_os + num_outer_lines_os
+            pyp_interface.oversampling * pyp_interface.numberOfCentralLines + 2 * num_adc_per_ramp_os +
+            num_outer_lines_os
         )
         # per gradient (including oversampling)
         num_out_lines_per_grad_os = int(num_outer_lines_os / 2)
         # flat time
         flat_time_us = set_on_grad_raster_time(
-            system=system, time=num_out_lines_per_grad_os * params.dwell
+            system=system, time=num_out_lines_per_grad_os * pyp_interface.dwell
         )
         flat_time_fs = set_on_grad_raster_time(
-            system=system, time=params.numberOfCentralLines * params.dwell * params.oversampling
+            system=system, time=pyp_interface.numberOfCentralLines * pyp_interface.dwell * pyp_interface.oversampling
         )
 
         # stitch them together / we cover this with one continous adc and use gridding of kbnufft
@@ -423,7 +429,7 @@ class Kernel:
         # build
         grad_read = events.GRAD()
         grad_read.system = system
-        grad_read.channel = params.read_dir
+        grad_read.channel = pyp_interface.read_dir
         grad_read.t_delay_s = 0.0
         grad_read.max_grad = system.max_grad
         grad_read.max_slew = system.max_slew
@@ -454,7 +460,7 @@ class Kernel:
             # ToDo
             adc = events.ADC.make_adc(
                 system=system,
-                dwell=params.dwell,
+                dwell=pyp_interface.dwell,
                 num_samples=num_lines_total_os
             )
 
@@ -495,7 +501,7 @@ class Kernel:
 
             adc = events.ADC.make_adc(
                 system=system,
-                dwell=params.dwell,
+                dwell=pyp_interface.dwell,
                 num_samples=num_lines_total_os
             )
 
@@ -513,40 +519,40 @@ class Kernel:
         return acq, acc_max
 
     @classmethod
-    def spoil_all_grads(cls, params: options.SequenceParameters, system: pp.Opts):
+    def spoil_all_grads(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts):
         grad_read = events.GRAD.make_trapezoid(
-            channel=params.read_dir, system=system,
-            flat_area=params.deltaK_read * params.resolutionNRead, flat_time=params.acquisitionTime
+            channel=pyp_interface.read_dir, system=system,
+            flat_area=pyp_interface.deltaK_read * pyp_interface.resolutionNRead, flat_time=pyp_interface.acquisitionTime
         )
-        phase_grad_areas = (- np.arange(params.resolutionNPhase) + params.resolutionNPhase / 2) * \
-                           params.deltaK_phase
+        phase_grad_areas = (- np.arange(pyp_interface.resolutionNPhase) + pyp_interface.resolutionNPhase / 2) * \
+                           pyp_interface.deltaK_phase
         grad_read_spoil = events.GRAD.make_trapezoid(
-            channel=params.read_dir,
-            area=-params.readSpoilingFactor * grad_read.area,
+            channel=pyp_interface.read_dir,
+            area=-pyp_interface.readSpoilingFactor * grad_read.area,
             system=system
         )
         grad_phase = events.GRAD.make_trapezoid(
-            channel=params.phase_dir,
+            channel=pyp_interface.phase_dir,
             area=np.max(phase_grad_areas),
             system=system
         )
         grad_slice = events.GRAD.make_trapezoid(
             channel='z',
             system=system,
-            area=params.sliceEndSpoilingMoment
+            area=pyp_interface.sliceEndSpoilingMoment
         )
         duration = grad_phase.set_on_raster(
             np.max([grad_slice.get_duration(), grad_phase.get_duration(), grad_read_spoil.get_duration()])
         )
         # set longest for all
         grad_read_spoil = events.GRAD.make_trapezoid(
-            channel=params.read_dir,
-            area=-params.readSpoilingFactor * grad_read.area,
+            channel=pyp_interface.read_dir,
+            area=-pyp_interface.readSpoilingFactor * grad_read.area,
             system=system,
             duration_s=duration
         )
         grad_phase = events.GRAD.make_trapezoid(
-            channel=params.phase_dir,
+            channel=pyp_interface.phase_dir,
             area=np.max(phase_grad_areas),
             system=system,
             duration_s=duration
@@ -554,7 +560,7 @@ class Kernel:
         grad_slice = events.GRAD.make_trapezoid(
             channel='z',
             system=system,
-            area=-params.sliceEndSpoilingMoment,
+            area=-pyp_interface.sliceEndSpoilingMoment,
             duration_s=duration
         )
         return cls(system=system, grad_slice=grad_slice, grad_phase=grad_phase, grad_read=grad_read_spoil)
@@ -677,7 +683,7 @@ class Kernel:
                 )
             # if pf acquisition
             if hasattr(self, "t_mid"):
-                fig.add_vline(x=1e6*self.t_mid, line_dash="dash", line_color="red",
+                fig.add_vline(x=1e6 * self.t_mid, line_dash="dash", line_color="red",
                               annotation_text="k-space-read-center", annotation_position="top left")
             # color cycle (maximally adc + 3 grads) - purple, cyan, orange, lime
             colors = ["#5c15ad", "#1fdeab", "#de681f", "#de681f"]

@@ -12,7 +12,7 @@ import tqdm
 logModule = logging.getLogger(__name__)
 
 
-def pretty_plot_et(seq: options.Sequence,
+def pretty_plot_et(seq: options.Config,
                    save: typing.Union[str, Path] = "",
                    plot_blips: bool = False,
                    t_start: int = 0,
@@ -22,7 +22,7 @@ def pretty_plot_et(seq: options.Sequence,
     logging.info(f"plot")
 
     # set time until which to plot (taking 1echo time more for nice plot)
-    t_total = (seq.params.ETL + 2) * seq.params.ESP * 1000  # in us
+    t_total = (seq.interface.ETL + 2) * seq.interface.ESP * 1000  # in us
     # build x ax
     x_arr = np.arange(0, int(t_total))
     # init arrays
@@ -192,19 +192,19 @@ def pretty_plot_et(seq: options.Sequence,
     plt.show()
 
 
-def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
-    n_read = seq_vars.params.resolutionNRead
-    n_phase = seq_vars.params.resolutionNPhase
-    x_ax = np.tile(np.arange(n_read), seq_vars.params.ETL)
+def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Config):
+    n_read = seq_vars.interface.resolutionNRead
+    n_phase = seq_vars.interface.resolutionNPhase
+    x_ax = np.tile(np.arange(n_read), seq_vars.interface.ETL)
     y_ax = np.arange(n_phase) - int(n_phase / 2)
-    plot_arr = np.zeros((seq_vars.params.resolutionNPhase, n_read * seq_vars.params.ETL))
+    plot_arr = np.zeros((seq_vars.interface.resolutionNPhase, n_read * seq_vars.interface.ETL))
     for s_indices in tqdm.tqdm(sampling_pattern, desc="processing sampling scheme"):
         pe_num = s_indices['pe_num']
         echo_num = s_indices['echo_num']
         plot_arr[pe_num, echo_num*n_read:(echo_num+1)*n_read] = 1
 
-    x_labels = np.arange(1, seq_vars.params.ETL + 1)
-    x_pos = np.array([n_read/2 + k*n_read for k in range(seq_vars.params.ETL)])
+    x_labels = np.arange(1, seq_vars.interface.ETL + 1)
+    x_pos = np.array([n_read / 2 + k * n_read for k in range(seq_vars.interface.ETL)])
     y_labels = [0]
     y_pos = [int(n_phase/2)]
 
@@ -216,7 +216,7 @@ def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
     ax.set_ylabel("# phase encode")
     ax.set_xticks(x_pos, labels=x_labels)
     ax.set_yticks(y_pos, labels=y_labels)
-    ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.params.ETL)
+    ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.interface.ETL)
     plt.show()
 
 
@@ -244,7 +244,7 @@ if __name__ == '__main__':
     seq_path = Path(
         "D:\\Daten\\01_Work\\11_owncloud\\ds_mese_cbs_js\\97_pulseq\\sequence\\seq_1a_fa180_fov_210-166-10_RL\\jstmc1a_fa180_fov210-165-14_RL.seq"
     ).absolute()
-    seq = options.Sequence.load(seq_path)
+    seq = options.RXV_Sequence.load(seq_path)
     scan_time = np.sum(seq.pp_seq.block_durations)
     pretty_plot_et(seq, plot_blips=True, t_start=0, figsize=(10, 5))
 
