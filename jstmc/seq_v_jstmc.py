@@ -38,6 +38,7 @@ class SeqJstmc(seq_baseclass.Sequence):
             pyp_interface=self.params,
             system=self.pp_sys
         )
+        self.id_acq_se = "fs_acq"
 
         self.block_refocus, self.phase_enc_time = kernels.Kernel.refocus_slice_sel_spoil(
             pyp_interface=self.params,
@@ -58,6 +59,7 @@ class SeqJstmc(seq_baseclass.Sequence):
 
         self.block_excitation_nav: kernels.Kernel = self._set_excitation_fid_nav()
         self.block_list_fid_nav_acq: list = self._set_acquisition_fid_nav()
+        self.id_acq_nav = "nav_acq"
 
         if self.params.visualize:
             self.block_excitation.plot(path=self.interface.config.output_path, name="excitation")
@@ -71,7 +73,26 @@ class SeqJstmc(seq_baseclass.Sequence):
     # sampling + k traj
     def _set_k_trajectories(self):
         # read direction is always fully oversampled, no trajectories to register
-        pass
+        grad_pre_area = float(np.sum(self.block_excitation.grad_read.area))
+        # calculate trajectory for pf readout
+        self._register_k_trajectory(
+            self.block_acquisition.get_k_space_trajectory(
+                pre_read_area=grad_pre_area, fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
+            ),
+            identifier=self.id_acq_se
+        )
+        # pick some nav acquisition
+        acq_num = 2
+        acq_nav_block = self.block_list_fid_nav_acq[acq_num]
+        # get pre area
+        grad_pre_area = np.sum(self.block_list_fid_nav_acq[acq_num - 1].grad_read.area) / 2
+        self._register_k_trajectory(
+            acq_nav_block.get_k_space_trajectory(
+                pre_read_area=grad_pre_area,
+                fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read * self.nav_resolution_defactor
+            ),
+            identifier=self.id_acq_nav
+        )
 
     # recon
     def _set_nav_parameters(self):
@@ -165,7 +186,7 @@ class SeqJstmc(seq_baseclass.Sequence):
             if not self.delay_ref_adc.check_on_block_raster():
                 err = f"adc ref delay not on block raster"
                 logModule.error(err)
-        tes = np.arange(1, self.params.ETL+1) * self.params.ESP
+        tes = np.arange(1, self.params.ETL + 1) * self.params.ESP
         self.te = tes.tolist()
 
     def _calculate_slice_delay(self):
@@ -242,7 +263,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                 # write sampling pattern
                 scan_idx, _ = self._write_sampling_pattern_entry(
                     scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice], pe_num=self.k_indexes[0, idx_n],
-                    echo_num=0
+                    echo_num=0, acq_type=self.id_acq_se
                 )
 
                 # delay if necessary
@@ -268,7 +289,8 @@ class SeqJstmc(seq_baseclass.Sequence):
                     # write sampling pattern
                     scan_idx, _ = self._write_sampling_pattern_entry(
                         scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice],
-                        pe_num=self.k_indexes[echo_idx, idx_n], echo_num=echo_idx
+                        pe_num=self.k_indexes[echo_idx, idx_n], echo_num=echo_idx,
+                        acq_type=self.id_acq_se
                     )
 
                     # delay if necessary
@@ -310,7 +332,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                         nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
                         scan_idx, _ = self._write_sampling_pattern_entry(
                             scan_num=scan_idx, slice_num=nav_idx, nav_dir=nav_read_dir, nav_acq=True,
-                            pe_num=nav_line_pe, echo_num=-1
+                            pe_num=nav_line_pe, echo_num=-1, acq_type=self.id_acq_nav
                         )
                         line_counter += 1
 

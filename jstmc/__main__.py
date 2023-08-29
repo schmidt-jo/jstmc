@@ -14,8 +14,14 @@ def main():
 
     logging.info("Starting sequence build")
     # setup sequence algorithm
-    # jstmc_seq = seq_v_jstmc.JsTmcSequence.from_cli(args=pog_args)
-    jstmc_seq = seq_v_vespa.SeqVespaGerd.from_cli(args=prog_args)
+    if prog_args.t == "vespa":
+        jstmc_seq = seq_v_vespa.SeqVespaGerd.from_cli(args=prog_args)
+    elif prog_args.t == "mese_fidnav":
+        jstmc_seq = seq_v_jstmc.SeqJstmc.from_cli(args=prog_args)
+    else:
+        err = f"sequence type ({prog_args.t}) not recognised."
+        logging.error(err)
+        raise ValueError(err)
     # build sequence
     jstmc_seq.build()
 

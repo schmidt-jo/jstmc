@@ -1,5 +1,4 @@
 import pandas as pd
-import typing
 from jstmc import options, kernels, plotting
 import numpy as np
 import logging
@@ -254,11 +253,6 @@ class Sequence(abc.ABC):
             "echo_num": echo_num, "echo_type": echo_type, "echo_type_num": echo_type_num,
             "nav_acq": nav_acq, "nav_dir": nav_dir
         })
-        # build shorthand for interface
-        # self.interface.sampling_k_traj.write_sampling_pattern_entry(
-        #     scan_num=scan_num, slice_num=slice_num, pe_num=pe_num,
-        #     echo_num=echo_num, acq_type=acq_type, echo_type=echo_type, echo_type_num=echo_type_num,
-        #     nav_acq=nav_acq, nav_dir=nav_dir)
         return scan_num + 1, echo_type_num + 1
 
     def _write_sampling_pattern(self):

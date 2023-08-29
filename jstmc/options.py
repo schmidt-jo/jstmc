@@ -9,7 +9,8 @@ log_module = logging.getLogger(__name__)
 class Config:
     # Input sequence configuration
     i: str = sp.field(default="", help="Input Sequence Configuration")
-    s: str = sp.field(default="", help="Input System Specifications")
+    s: str = sp.field(default="./default_config/system_specifications_7T_mpi_cbs.json",
+                      help="Input System Specifications")
     o: str = sp.field(default="", help="Output Path for .seq file and pypsi interface")
     v: bool = sp.field(default=True, help="Visualize on/off")
     r: bool = sp.field(default=False, help="Report on/off")
@@ -17,6 +18,7 @@ class Config:
     n: str = sp.field(default="jstmc", help="Sequence Name")
 
     d: bool = sp.field(default=False, help="Debug on/off")
+    t: str = sp.field(default="vespa", choices=["vespa", "mese_fidnav"], help="Sequence Type")
 
 
 def create_cli() -> Config:
