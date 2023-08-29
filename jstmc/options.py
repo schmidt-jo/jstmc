@@ -14,6 +14,7 @@ class Config:
     v: bool = sp.field(default=True, help="Visualize on/off")
     r: bool = sp.field(default=False, help="Report on/off")
     vv: str = sp.field(default="xx", help="Version")
+    n: str = sp.field(default="jstmc", help="Sequence Name")
 
     d: bool = sp.field(default=False, help="Debug on/off")
 
