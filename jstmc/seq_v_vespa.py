@@ -24,16 +24,24 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         self.block_pf_acquisition, grad_pre_area = Kernel.acquisition_pf_undersampled(
             pyp_interface=self.params, system=self.pp_sys
         )
+        # add id
+        self.id_pf_acq: str = "gre_us_pf"
+
         # undersampled readout with symmetrical accelerated sidelobes
         self.block_se_acq, self.acc_factor_us_read = Kernel.acquisition_sym_undersampled(
             pyp_interface=self.params, system=self.pp_sys
         )
+        # add id
+        self.id_se_acq: str = "se_us_sym"
 
         # gradient echo readouts, always have inverted gradient direction wrt to se readouts,
         # - inverted gradient, k-space from right to left
         self.block_gre_acq, _ = Kernel.acquisition_sym_undersampled(
             pyp_interface=self.params, system=self.pp_sys, invert_grad_dir=True
         )
+        # add id
+        self.id_gre_acq: str = "gre_us_sym"
+
         # spoiling at end of echo train
         self.block_spoil_end: Kernel = Kernel.spoil_all_grads(
             pyp_interface=self.params, system=self.pp_sys
@@ -91,7 +99,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             self.block_pf_acquisition.get_k_space_trajectory(
                 pre_read_area=grad_pre_area, fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
             ),
-            identifier="pf_acq"
+            identifier=self.id_pf_acq
         )
 
         # calculate trajectory for gre readout, prephasing area = to refocus block read area half
@@ -100,16 +108,16 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                 pre_read_area=np.sum(self.block_refocus.grad_read.area) / 2,
                 fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
             ),
-            identifier="gre_acq"
+            identifier=self.id_gre_acq
         )
         # calculate trajectory for se readouts, prephasing is the prephase gre area + whole gre area
-        pre_area_se = np.sum(self.block_refocus.grad_read.area) / 2 + np.sum(self.block_gre_acq.area)
+        pre_area_se = np.sum(self.block_refocus.grad_read.area) / 2 + np.sum(self.block_gre_acq.grad_read.area)
         self._register_k_trajectory(
             self.block_se_acq.get_k_space_trajectory(
                 pre_read_area=pre_area_se,
                 fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
             ),
-            identifier="se_acq"
+            identifier=self.id_se_acq
         )
 
     # recon
@@ -217,8 +225,6 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         self._set_k_space()
         log_module.info(f"build -- set up slices")
         self._set_delta_slices()
-        log_module.info(f"build -- loop lines")
-        self._loop_lines()
 
     def _calculate_slice_delay(self):
         # time per echo train
@@ -359,24 +365,30 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         self.pp_seq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(
-            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop], pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
-            echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx
+            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop],
+            pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
+            echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx,
+            acq_type=self.id_gre_acq
         )
 
         # add se sampling
         self.pp_seq.add_block(*self.block_se_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_se_idx = self._write_sampling_pattern_entry(
-            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop], pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
-            echo_num=echo_gre_idx + echo_se_idx, echo_type="se", echo_type_num=echo_se_idx
+            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop],
+            pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
+            echo_num=echo_gre_idx + echo_se_idx, echo_type="se", echo_type_num=echo_se_idx,
+            acq_type=self.id_se_acq
         )
 
         # add gre sampling
         self.pp_seq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(
-            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop], pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
-            echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx
+            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop],
+            pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
+            echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx,
+            acq_type=self.id_gre_acq
         )
         return scan_idx, echo_se_idx, echo_gre_idx
 
@@ -404,7 +416,8 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                 # write sampling pattern
                 scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(
                     scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice], pe_num=self.k_indexes[0, idx_n],
-                    echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx
+                    echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx,
+                    acq_type=self.id_pf_acq
                 )
                 # delay if necessary
                 if self.t_delay_e0_ref1.get_duration() > 1e-7:

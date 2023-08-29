@@ -200,16 +200,6 @@ class SeqJstmc(seq_baseclass.Sequence):
             self.delay_slice.set_on_block_raster()
             logModule.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
 
-    def _write_sampling_pattern(self, echo_idx: int, phase_idx: int, slice_idx: int,
-                                num_scan: int = -1, nav_flag: bool = False, nav_dir: int = 0):
-        sampling_index = {
-            "num_scan": num_scan, "navigator": nav_flag,
-            "slice_num": slice_idx, "pe_num": phase_idx, "echo_num": echo_idx, "nav_dir": nav_dir
-        }
-        self.sampling_pattern_constr.append(sampling_index)
-        self.sampling_pattern_set = True
-        return num_scan + 1
-
     def _build(self):
         logModule.info(f"build -- calculate minimum ESP")
         self._calculate_min_esp()
@@ -221,8 +211,6 @@ class SeqJstmc(seq_baseclass.Sequence):
         self._set_k_space()
         logModule.info(f"build -- set up slices")
         self._set_delta_slices()
-        logModule.info(f"build -- loop lines")
-        self._loop_lines()
 
     def _loop_lines(self):
         # through phase encodes

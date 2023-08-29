@@ -6,11 +6,12 @@ import logging
 import pypulseq as pp
 import pypsi
 import pathlib as plib
+import abc
 
 log_module = logging.getLogger(__name__)
 
 
-class Sequence:
+class Sequence(abc.ABC):
     def __init__(self, pypsi_params: pypsi.Params = pypsi.Params()):
 
         self.interface: pypsi.Params = pypsi_params
@@ -43,9 +44,7 @@ class Sequence:
         self.block_excitation: kernels.Kernel = NotImplemented
         self.block_refocus: kernels.Kernel = NotImplemented
 
-        self.sampling_pattern_constr: list = []
-        self.sampling_pattern: pd.DataFrame = pd.DataFrame()
-        self.sequence_info: dict = {}
+        self._sampling_pattern_constr: list = []
         self.block_excitation: kernels.Kernel = kernels.Kernel()
 
         # use random state for reproducibiltiy of eg sampling patterns
@@ -75,14 +74,23 @@ class Sequence:
                 err = f"A {msg[l_idx]} file needs to be provided and {l_file} was not found to be a valid file."
                 log_module.error(err)
                 raise FileNotFoundError(err)
-        # set output path
-        o_path = plib.Path(args.o).absolute()
-        if o_path.suffixes:
-            md = o_path.parent
+
+        if args.o:
+            # set output path
+            o_path = plib.Path(args.o).absolute()
+            if o_path.suffixes:
+                md = o_path.parent
+            else:
+                md = o_path
+            # check if exist
+            md.mkdir(parents=True, exist_ok=True)
         else:
-            md = o_path
-        # check if exist
-        md.mkdir(parents=True, exist_ok=True)
+            # use input path
+            o_path = plib.Path(args.i).absolute()
+            if o_path.suffixes:
+                o_path = o_path.parent
+            log_module.info(f"no output path specified, using same as input: {o_path}")
+
         pypsi_params.config.output_path = o_path
 
         # overwrite extra arguments if not default_config
@@ -107,26 +115,22 @@ class Sequence:
         return self.z
 
     # writes
-    def write_seq(self, file_name: typing.Union[str, plib.Path]):
-        file_name = plib.Path(file_name).absolute()
-        save_file = file_name.with_suffix(".seq").__str__()
-        log_module.info(f"writing file: {save_file}")
+    def write_seq(self, name: str = "pypulseq_seq"):
+        file_name = plib.Path(self.interface.config.output_path).absolute()
+        save_file = file_name.joinpath(name).with_suffix(".seq")
+        log_module.info(f"writing file: {save_file.as_posix()}")
         self._check_interface_set()
-        self.pp_seq.write(save_file)
+        self.set_pyp_definitions()
+        self.pp_seq.write(save_file.as_posix())
 
-    def write_pypsi(self, output_path: typing.Union[str, plib.Path]):
-        # make plib Path ifn
-        output_path = plib.Path(output_path).absolute()
-        # check exist
-        if output_path.suffixes:
-            output_path = output_path.parent
-        output_path.mkdir(parents=True, exist_ok=True)
-
+    def write_pypsi(self, name: str = "pypsi_interface"):
+        path = plib.Path(self.interface.config.output_path).absolute()
+        save_file = path.joinpath(name).with_suffix(".pkl")
         self._check_interface_set()
         # write
-        self.interface.save(output_path)
+        self.interface.save(save_file)
 
-    def setDefinitions(self):
+    def set_pyp_definitions(self):
         self.pp_seq.set_definition(
             "FOV",
             [*self.params.get_fov()]
@@ -191,26 +195,30 @@ class Sequence:
     def build(self):
         log_module.info(f"__Build Sequence__")
         self._build()
+        log_module.info(f"build -- loop lines")
+        self._loop_lines()
         log_module.info(f"set pypsi interface")
         # sampling + k traj
-        self._set_k_trajectories()    # raises error if not implemented
-        # self._fill_sampling_parameters()
+        self._write_sampling_pattern()
+        self._set_k_trajectories()  # raises error if not implemented
         # recon
         self._set_recon_parameters_img()
-        self._set_nav_parameters()    # raises error if not implemented
+        self._set_nav_parameters()  # raises error if not implemented
         # emc
-        self._set_emc_parameters()    # raises error if not implemented
+        self._set_emc_parameters()  # raises error if not implemented
         # pulse
         self._set_pulse_info()
 
     # __ private __
+    @abc.abstractmethod
     def _build(self):
         # to be defined for each sequence variant
-        raise NotImplementedError
+        pass
 
+    @abc.abstractmethod
     def _loop_lines(self):
         # to be implemented for each variant, looping through the phase encodes
-        raise NotImplementedError
+        pass
 
     # caution: this is closely tied to the pypsi module and changes in either might affect the other!
     def _check_interface_set(self):
@@ -222,21 +230,31 @@ class Sequence:
 
     # sampling & k - space
     def _write_sampling_pattern_entry(self, scan_num: int, slice_num: int, pe_num: int, echo_num: int,
-            acq_type: str = "", echo_type: str = "", echo_type_num: int = -1,
-            nav_acq: bool = False, nav_dir: int = 0):
+                                      acq_type: str = "", echo_type: str = "", echo_type_num: int = -1,
+                                      nav_acq: bool = False, nav_dir: int = 0):
         log_module.debug(f"set pypsi sampling pattern")
         self.sampling_pattern_set = True
+        # save to list
+        self._sampling_pattern_constr.append({
+            "scan_num": scan_num, "slice_num": slice_num, "pe_num": pe_num, "acq_type": acq_type,
+            "echo_num": echo_num, "echo_type": echo_type, "echo_type_num": echo_type_num,
+            "nav_acq": nav_acq, "nav_dir": nav_dir
+        })
         # build shorthand for interface
-        self.interface.sampling_k_traj.write_sampling_pattern_entry(
-            scan_num=scan_num, slice_num=slice_num, pe_num=pe_num,
-            echo_num=echo_num, acq_type=acq_type, echo_type=echo_type, echo_type_num=echo_type_num,
-            nav_acq=nav_acq, nav_dir=nav_dir)
+        # self.interface.sampling_k_traj.write_sampling_pattern_entry(
+        #     scan_num=scan_num, slice_num=slice_num, pe_num=pe_num,
+        #     echo_num=echo_num, acq_type=acq_type, echo_type=echo_type, echo_type_num=echo_type_num,
+        #     nav_acq=nav_acq, nav_dir=nav_dir)
         return scan_num + 1, echo_type_num + 1
 
+    def _write_sampling_pattern(self):
+        self.interface.sampling_k_traj.sampling_pattern_from_list(sp_list=self._sampling_pattern_constr)
+
+    @abc.abstractmethod
     def _set_k_trajectories(self):
         log_module.debug(f"set pypsi k-traj")
         # to be implemented by sequence variants
-        raise NotImplementedError
+        pass
 
     def _register_k_trajectory(self, trajectory: np.ndarray, identifier: str):
         log_module.debug(f"pypsi: register k - trajectory ({identifier}) in interface")
@@ -264,10 +282,11 @@ class Sequence:
         )
         self.recon_params_set = True
 
+    @abc.abstractmethod
     def _set_nav_parameters(self):
         log_module.debug(f"set pypsi recon nav")
         # to be implemented for each variant
-        raise NotImplementedError
+        pass
 
     # emc
     def _set_emc_parameters(self):
@@ -303,10 +322,11 @@ class Sequence:
 
         self._fill_emc_info()
 
+    @abc.abstractmethod
     def _fill_emc_info(self):
         log_module.debug(f"fill pypsi emc")
         # to be implemented for each variant
-        raise NotImplementedError
+        pass
 
     # pulse
     def _set_pulse_info(self):
@@ -319,7 +339,6 @@ class Sequence:
 
         self.interface.pulse.amplitude = np.abs(self.block_excitation.rf.signal)
         self.interface.pulse.phase = np.angle(self.block_excitation.rf.signal)
-
 
     # inits
     def _set_pp_sys_from_pypsi(self) -> pp.Opts:

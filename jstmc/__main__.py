@@ -1,7 +1,7 @@
 from jstmc import options, seq_v_jstmc, seq_v_vespa
 import numpy as np
 import logging
-from pathlib import Path
+import pathlib as plib
 logging.getLogger('matplotlib.axis').disabled = True
 
 
@@ -14,10 +14,10 @@ def main():
 
     logging.info("Starting sequence build")
     # setup sequence algorithm
-    # jstmc_algo = seq_v_jstmc.JsTmcSequence.from_cli(args=pog_args)
-    jstmc_algo = seq_v_vespa.SeqVespaGerd.from_cli(args=prog_args)
+    # jstmc_seq = seq_v_jstmc.JsTmcSequence.from_cli(args=pog_args)
+    jstmc_seq = seq_v_vespa.SeqVespaGerd.from_cli(args=prog_args)
     # build sequence
-    jstmc_algo.build()
+    jstmc_seq.build()
     #
     # # get emc_info
     # emc_info = jstmc_algo.get_emc_info()
@@ -30,28 +30,33 @@ def main():
     # # get sequence info for recon
     # seq_info = jstmc_algo.get_sequence_info()
     # get seq object
-    seq = jstmc_algo.get_seq()
-
-    scan_time = np.sum(seq.pp_seq.block_durations)
+    # seq = jstmc_algo.get_seq()
+    # gepypulseq sequence object
+    pyp_seq = jstmc_seq.get_pypulseq_seq()
+    scan_time = np.sum(pyp_seq.block_durations)
     logging.info(f"Total Scan Time Sum Seq File: {scan_time / 60:.1f} min")
 
     logging.info("Verifying and Writing Files")
     # verifying
-    if seq.config.report:
-        outpath = Path(seq.config.outputPath).absolute().joinpath("report.txt")
+    if jstmc_seq.params.report:
+        outpath = plib.Path(jstmc_seq.interface.config.output_path).absolute().joinpath("report.txt")
         with open(outpath, "w") as w_file:
-            report = seq.pp_seq.test_report()
-            ok, err_rep = seq.pp_seq.check_timing()
+            report = pyp_seq.test_report()
+            ok, err_rep = pyp_seq.check_timing()
             log = "report \n" + report + "\ntiming_check \n" + str(ok) + "\ntiming_error \n"
             w_file.write(log)
             for err_rep_item in err_rep:
                 w_file.write(f"{str(err_rep_item)}\n")
 
     # saving details
-    # seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern, pulse_signal=pulse, sequence_info=seq_info)
-    logging.info(f".seq set definitions: {seq.pp_seq.definitions}")
+    # saving
+    jstmc_seq.write_seq()
+    jstmc_seq.write_pypsi()
 
-    if seq.config.visualize:
+    # seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern, pulse_signal=pulse, sequence_info=seq_info)
+    logging.info(f".seq set definitions: {pyp_seq.definitions}")
+
+    if jstmc_seq.interface.config.visualize:
         logging.info("Plotting")
         # give z and slice thickness both with same units. here mm
         # utils.plot_slice_acquisition(z * 1e3, seq.interface.resolutionSliceThickness)
@@ -60,7 +65,7 @@ def main():
         # utils.pretty_plot_et(seq, t_start=1e3 * scan_time / 2 - 2 * seq.interface.TR,
         #                      save=Path(options.RXV_Sequence.config.outputPath).absolute().joinpath("echo_train_semc"))
 
-        seq.pp_seq.plot(time_range=(0, 2e-3 * seq.interface.TR), time_disp='s')
+        pyp_seq.plot(time_range=(0, 2e-3 * jstmc_seq.params.TR), time_disp='s')
         # seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
 
 
