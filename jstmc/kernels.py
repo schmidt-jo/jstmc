@@ -112,7 +112,7 @@ class Kernel:
             spoiling_moment = 2e-7
         if pyp_interface.extRfExc:
             log_module.info(f"rf -- loading rfpf from file: {pyp_interface.extRfExc}")
-            rf = events.RF.load_from_rfpf(
+            rf = events.RF.load_from_pypsi_pulse(
                 fname=pyp_interface.extRfExc, flip_angle_rad=pyp_interface.excitationRadFA,
                 phase_rad=pyp_interface.excitationRadRfPhase,
                 system=system, duration_s=pyp_interface.excitationDuration * 1e-6,
@@ -190,7 +190,7 @@ class Kernel:
 
         if pyp_interface.extRfRef:
             log_module.info(f"rf -- loading rfpf from file {pyp_interface.extRfRef}")
-            rf = events.RF.load_from_rfpf(
+            rf = events.RF.load_from_pypsi_pulse(
                 fname=pyp_interface.extRfRef, system=system,
                 duration_s=pyp_interface.refocusingDuration * 1e-6, flip_angle_rad=np.pi,
                 phase_rad=0.0, pulse_type='refocusing'

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pypulseq as pp
 
 import numpy as np
-import rf_pulse_files as rfpf
+from pypulseq_interface import pypsi
 import logging
 import copy
 
@@ -56,11 +56,11 @@ class RF(Event):
         self.signal: np.ndarray = np.zeros(0, dtype=complex)
 
     @classmethod
-    def load_from_rfpf(cls, fname: str, flip_angle_rad: float, phase_rad: float, system: pp.Opts,
-                       duration_s: float = 2e-3, delay_s: float = 0.0, pulse_type: str = 'excitation'):
+    def load_from_pypsi_pulse(cls, fname: str, flip_angle_rad: float, phase_rad: float, system: pp.Opts,
+                              duration_s: float = 2e-3, delay_s: float = 0.0, pulse_type: str = 'excitation'):
         rf_instance = cls()
         rf_instance.system = system
-        rf = rfpf.RF.load(fname)
+        rf = pypsi.Params.pulse.load(fname)
         rf_instance.extRfFile = fname
         rf_instance.pulse_type = pulse_type
 
