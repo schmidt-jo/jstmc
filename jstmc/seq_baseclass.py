@@ -240,6 +240,13 @@ class Sequence(abc.ABC):
                    f" Sampling Pattern ({self.sampling_pattern_set}), K-Trajectory ({self.k_trajectory_set})," \
                    f" Recon Parameters ({self.recon_params_set})"
             log_module.warning(warn)
+        if not (self.interface.sampling_k_traj.sampling_pattern["acq_type"].unique() ==
+                self.interface.sampling_k_traj.k_trajectories["acquisition"].unique()).all():
+            warn = f"acquisitions registered in sampling pattern: " \
+                   f"{self.interface.sampling_k_traj.sampling_pattern['acq_type'].unique()} and registered " \
+                   f"k-trajectory - types " \
+                   f"{self.interface.sampling_k_traj.k_trajectories['acquisition'].unique()} do not coincide"
+            log_module.warning(warn)
 
     # sampling & k - space
     def _write_sampling_pattern_entry(self, scan_num: int, slice_num: int, pe_num: int, echo_num: int,
