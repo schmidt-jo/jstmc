@@ -214,17 +214,11 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         sbb.grad_read.amplitude[1:3] = amplitude
         sbb.grad_read.area[0] = area_rewind
 
-    def _build(self):
+    def _build_variant(self):
         log_module.info(f"build -- calculate minimum ESP")
         self._calculate_echo_timings()
         log_module.info(f"build -- calculate slice delay")
         self._calculate_slice_delay()
-        log_module.info(f"build -- calculate total scan time")
-        self._calculate_scan_time()
-        log_module.info(f"build -- set up k-space")
-        self._set_k_space()
-        log_module.info(f"build -- set up slices")
-        self._set_delta_slices()
 
     def _calculate_slice_delay(self):
         # time per echo train

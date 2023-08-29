@@ -18,19 +18,7 @@ def main():
     jstmc_seq = seq_v_vespa.SeqVespaGerd.from_cli(args=prog_args)
     # build sequence
     jstmc_seq.build()
-    #
-    # # get emc_info
-    # emc_info = jstmc_algo.get_emc_info()
-    # # get slice info
-    # z = jstmc_algo.get_z()
-    # # get sampling pattern
-    # sampling_pattern = jstmc_algo.get_sampling_pattern()
-    # # get pulse info
-    # pulse = jstmc_algo.get_pulse_rfpf()
-    # # get sequence info for recon
-    # seq_info = jstmc_algo.get_sequence_info()
-    # get seq object
-    # seq = jstmc_algo.get_seq()
+
     # gepypulseq sequence object
     pyp_seq = jstmc_seq.get_pypulseq_seq()
     scan_time = np.sum(pyp_seq.block_durations)
@@ -48,12 +36,10 @@ def main():
             for err_rep_item in err_rep:
                 w_file.write(f"{str(err_rep_item)}\n")
 
-    # saving details
     # saving
     jstmc_seq.write_seq()
     jstmc_seq.write_pypsi()
 
-    # seq.save(emc_info=emc_info, sampling_pattern=sampling_pattern, pulse_signal=pulse, sequence_info=seq_info)
     logging.info(f".seq set definitions: {pyp_seq.definitions}")
 
     if jstmc_seq.interface.config.visualize:

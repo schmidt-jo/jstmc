@@ -98,6 +98,7 @@ class Sequence(abc.ABC):
             "vv": "version",
             "r": "report",
             "v": "visualize",
+            "n": "name"
         }
         def_conf = options.Config()
         for key, val in d_extra.items():
@@ -115,16 +116,22 @@ class Sequence(abc.ABC):
         return self.z
 
     # writes
-    def write_seq(self, name: str = "pypulseq_seq"):
+    def write_seq(self, name: str = ""):
         file_name = plib.Path(self.interface.config.output_path).absolute()
+        if not name:
+            name = f"{self.params.name}_{self.params.version}"
+        name = f"pyp_seq_{name}"
         save_file = file_name.joinpath(name).with_suffix(".seq")
         log_module.info(f"writing file: {save_file.as_posix()}")
         self._check_interface_set()
         self.set_pyp_definitions()
         self.pp_seq.write(save_file.as_posix())
 
-    def write_pypsi(self, name: str = "pypsi_interface"):
+    def write_pypsi(self, name: str = ""):
         path = plib.Path(self.interface.config.output_path).absolute()
+        if not name:
+            name = f"{self.params.name}_{self.params.version}"
+        name = f"pypsi_{name}"
         save_file = path.joinpath(name).with_suffix(".pkl")
         self._check_interface_set()
         # write
@@ -194,7 +201,14 @@ class Sequence(abc.ABC):
 
     def build(self):
         log_module.info(f"__Build Sequence__")
-        self._build()
+        log_module.info(f"build -- calculate total scan time")
+        self._calculate_scan_time()
+        log_module.info(f"build -- set up k-space")
+        self._set_k_space()
+        log_module.info(f"build -- set up slices")
+        self._set_delta_slices()
+        log_module.info(f"build variant specifics")
+        self._build_variant()
         log_module.info(f"build -- loop lines")
         self._loop_lines()
         log_module.info(f"set pypsi interface")
@@ -211,7 +225,7 @@ class Sequence(abc.ABC):
 
     # __ private __
     @abc.abstractmethod
-    def _build(self):
+    def _build_variant(self):
         # to be defined for each sequence variant
         pass
 

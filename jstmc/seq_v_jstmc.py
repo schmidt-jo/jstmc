@@ -200,17 +200,11 @@ class SeqJstmc(seq_baseclass.Sequence):
             self.delay_slice.set_on_block_raster()
             logModule.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
 
-    def _build(self):
+    def _build_variant(self):
         logModule.info(f"build -- calculate minimum ESP")
         self._calculate_min_esp()
         logModule.info(f"build -- calculate slice delay")
         self._calculate_slice_delay()
-        logModule.info(f"build -- calculate total scan time")
-        self._calculate_scan_time()
-        logModule.info(f"build -- set up k-space")
-        self._set_k_space()
-        logModule.info(f"build -- set up slices")
-        self._set_delta_slices()
 
     def _loop_lines(self):
         # through phase encodes
