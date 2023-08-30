@@ -133,6 +133,7 @@ class Sequence(abc.ABC):
             name = f"{self.params.name}_{self.params.version}"
         name = f"pypsi_{name}"
         save_file = path.joinpath(name).with_suffix(".pkl")
+        log_module.info(f"writing file: {save_file.as_posix()}")
         self._check_interface_set()
         # write
         self.interface.save(save_file.as_posix().__str__())
