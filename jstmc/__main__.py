@@ -3,6 +3,7 @@ import numpy as np
 import logging
 import pathlib as plib
 logging.getLogger('matplotlib.axis').disabled = True
+logging.getLogger('simple_parsing').setLevel(logging.WARNING)
 
 
 def main():
