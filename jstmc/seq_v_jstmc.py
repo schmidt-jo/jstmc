@@ -99,7 +99,8 @@ class SeqJstmc(seq_baseclass.Sequence):
         self.interface.recon.set_navigator_params(
             lines_per_nav=int(self.params.resolution_n_phase * self.nav_resolution_defactor / 2),
             num_of_nav=self.params.number_central_lines + self.params.number_outer_lines,
-            nav_acc_factor=2, nav_resolution_scaling=self.nav_resolution_defactor
+            nav_acc_factor=2, nav_resolution_scaling=self.nav_resolution_defactor,
+            num_of_navs_per_tr=2
         )
 
     # emc
