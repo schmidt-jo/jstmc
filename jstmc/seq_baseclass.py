@@ -66,13 +66,17 @@ class Sequence(abc.ABC):
         for l_idx in range(len(loads)):
             # make plib Path
             l_file = plib.Path(loads[l_idx]).absolute()
-            if l_file.is_file():
-                log_module.info(f"loading {msg[l_idx]}: {l_file.as_posix()}")
-                pypsi_params.__setattr__(att[l_idx], pypsi_params.__getattribute__(att[l_idx]).load(l_file))
-            else:
-                err = f"A {msg[l_idx]} file needs to be provided and {l_file} was not found to be a valid file."
-                log_module.error(err)
-                raise FileNotFoundError(err)
+            if not l_file.is_file():
+                if l_idx == 0:
+                    err = f"A {msg[l_idx]} file needs to be provided and {l_file} was not found to be a valid file."
+                    log_module.error(err)
+                    raise FileNotFoundError(err)
+                else:
+                    warn = f"A {msg[l_idx]} file needs to be provided and {l_file} was not found to be a valid file." \
+                           f" Falling back to defaults! Check carefully!"
+                    log_module.warning(warn)
+            log_module.info(f"loading {msg[l_idx]}: {l_file.as_posix()}")
+            pypsi_params.__setattr__(att[l_idx], pypsi_params.__getattribute__(att[l_idx]).load(l_file))
 
         if args.o:
             # set output path
@@ -105,6 +109,7 @@ class Sequence(abc.ABC):
             if def_conf.__getattribute__(key) != args.__getattribute__(key):
                 pypsi_params.pypulseq.__setattr__(val, args.__getattribute__(key))
 
+        pypsi_params.display_sequence_configuration()
         return cls(pypsi_params=pypsi_params)
 
     # get
