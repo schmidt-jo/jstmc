@@ -309,8 +309,8 @@ class Sequence(abc.ABC):
         log_module.debug(f"set pypsi emc")
         self.interface.emc.gamma_hz = self.interface.specs.gamma
         self.interface.emc.gamma_pi = self.interface.specs.gamma / 2 / np.pi
-        self.interface.emc.ETL = self.params.etl
-        self.interface.emc.ESP = self.params.esp
+        self.interface.emc.etl = self.params.etl
+        self.interface.emc.esp = self.params.esp
         self.interface.emc.bw = self.params.bandwidth
         # self.interface.emc.gradMode = "Normal"
         self.interface.emc.excitationAngle = self.params.excitation_rf_rad_fa / np.pi * 180.0
