@@ -135,7 +135,7 @@ class Sequence(abc.ABC):
         save_file = path.joinpath(name).with_suffix(".pkl")
         self._check_interface_set()
         # write
-        self.interface.save(save_file)
+        self.interface.save(save_file.as_posix().__str__())
 
     def set_pyp_definitions(self):
         self.pp_seq.set_definition(
