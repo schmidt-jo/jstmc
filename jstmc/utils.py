@@ -22,7 +22,7 @@ def pretty_plot_et(seq: options.Config,
     logging.info(f"plot")
 
     # set time until which to plot (taking 1echo time more for nice plot)
-    t_total = (seq.interface.ETL + 2) * seq.interface.ESP * 1000  # in us
+    t_total = (seq.interface.etl + 2) * seq.interface.esp * 1000  # in us
     # build x ax
     x_arr = np.arange(0, int(t_total))
     # init arrays
@@ -193,18 +193,18 @@ def pretty_plot_et(seq: options.Config,
 
 
 def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Config):
-    n_read = seq_vars.interface.resolutionNRead
-    n_phase = seq_vars.interface.resolutionNPhase
-    x_ax = np.tile(np.arange(n_read), seq_vars.interface.ETL)
+    n_read = seq_vars.interface.resolution_n_read
+    n_phase = seq_vars.interface.resolution_n_phase
+    x_ax = np.tile(np.arange(n_read), seq_vars.interface.etl)
     y_ax = np.arange(n_phase) - int(n_phase / 2)
-    plot_arr = np.zeros((seq_vars.interface.resolutionNPhase, n_read * seq_vars.interface.ETL))
+    plot_arr = np.zeros((seq_vars.interface.resolution_n_phase, n_read * seq_vars.interface.etl))
     for s_indices in tqdm.tqdm(sampling_pattern, desc="processing sampling scheme"):
         pe_num = s_indices['pe_num']
         echo_num = s_indices['echo_num']
         plot_arr[pe_num, echo_num*n_read:(echo_num+1)*n_read] = 1
 
-    x_labels = np.arange(1, seq_vars.interface.ETL + 1)
-    x_pos = np.array([n_read / 2 + k * n_read for k in range(seq_vars.interface.ETL)])
+    x_labels = np.arange(1, seq_vars.interface.etl + 1)
+    x_pos = np.array([n_read / 2 + k * n_read for k in range(seq_vars.interface.etl)])
     y_labels = [0]
     y_pos = [int(n_phase/2)]
 
@@ -216,7 +216,7 @@ def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Config):
     ax.set_ylabel("# phase encode")
     ax.set_xticks(x_pos, labels=x_labels)
     ax.set_yticks(y_pos, labels=y_labels)
-    ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.interface.ETL)
+    ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.interface.etl)
     plt.show()
 
 

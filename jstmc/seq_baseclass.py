@@ -25,17 +25,17 @@ class Sequence(abc.ABC):
 
         # phase grads
         self.phase_areas: np.ndarray = (- np.arange(
-            self.params.resolutionNPhase
-        ) + self.params.resolutionNPhase / 2) * self.params.deltaK_phase
+            self.params.resolution_n_phase
+        ) + self.params.resolution_n_phase / 2) * self.params.delta_k_phase
         # slice loop
-        self.num_slices = self.params.resolutionNumSlices
+        self.num_slices = self.params.resolution_slice_num
         self.z = np.zeros((2, int(np.ceil(self.num_slices / 2))))
 
         self.trueSliceNum = np.zeros(self.num_slices, dtype=int)
         # k space
         self.k_indexes: np.ndarray = np.zeros(
-            (self.params.ETL,
-             self.params.numberOfCentralLines + self.params.numberOfOuterLines
+            (self.params.etl,
+             self.params.number_central_lines + self.params.number_outer_lines
              ),
             dtype=int
         )
@@ -97,7 +97,8 @@ class Sequence(abc.ABC):
             "vv": "version",
             "r": "report",
             "v": "visualize",
-            "n": "name"
+            "n": "name",
+            "t": "type"
         }
         def_conf = options.Config()
         for key, val in d_extra.items():
@@ -283,15 +284,15 @@ class Sequence(abc.ABC):
     def _set_recon_parameters_img(self):
         log_module.debug(f"set pypsi recon")
         self.interface.recon.set_recon_params(
-            img_n_read=self.params.resolutionNRead, img_n_phase=self.params.resolutionNPhase,
-            img_n_slice=self.params.resolutionNumSlices,
-            img_resolution_read=self.params.resolutionVoxelSizeRead,
-            img_resolution_phase=self.params.resolutionVoxelSizePhase,
-            img_resolution_slice=self.params.resolutionSliceThickness,
-            etl=self.params.ETL,
+            img_n_read=self.params.resolution_n_read, img_n_phase=self.params.resolution_n_phase,
+            img_n_slice=self.params.resolution_slice_num,
+            img_resolution_read=self.params.resolution_voxel_size_read,
+            img_resolution_phase=self.params.resolution_voxel_size_phase,
+            img_resolution_slice=self.params.resolution_slice_thickness,
+            etl=self.params.etl,
             os_factor=self.params.oversampling,
             read_dir=self.params.read_dir,
-            acc_factor_phase=self.params.accelerationFactor,
+            acc_factor_phase=self.params.acceleration_factor,
             acc_read=False,
             te=self.te
         )
@@ -308,26 +309,26 @@ class Sequence(abc.ABC):
         log_module.debug(f"set pypsi emc")
         self.interface.emc.gamma_hz = self.interface.specs.gamma
         self.interface.emc.gamma_pi = self.interface.specs.gamma / 2 / np.pi
-        self.interface.emc.ETL = self.params.ETL
-        self.interface.emc.ESP = self.params.ESP
+        self.interface.emc.ETL = self.params.etl
+        self.interface.emc.ESP = self.params.esp
         self.interface.emc.bw = self.params.bandwidth
         # self.interface.emc.gradMode = "Normal"
-        self.interface.emc.excitationAngle = self.params.excitationRadFA / np.pi * 180.0
-        self.interface.emc.excitationPhase = self.params.excitationRfPhase
+        self.interface.emc.excitationAngle = self.params.excitation_rf_rad_fa / np.pi * 180.0
+        self.interface.emc.excitationPhase = self.params.excitation_rf_phase
         self.interface.emc.gradientExcitation = self._set_grad_for_emc(
             self.block_excitation.grad_slice.slice_select_amplitude
         )
-        self.interface.emc.durationExcitation = self.params.excitationDuration
+        self.interface.emc.durationExcitation = self.params.excitation_duration
         self.interface.emc.gradientExcitationVerse1 = 0.0
         self.interface.emc.gradientExcitationVerse2 = 0.0
         self.interface.emc.durationExcitationVerse1 = 0.0
         self.interface.emc.durationExcitationVerse2 = 0.0
-        self.interface.emc.refocusAngle = self.params.refocusingFA
-        self.interface.emc.refocusPhase = self.params.refocusingRfPhase
+        self.interface.emc.refocusAngle = self.params.refocusing_rf_fa
+        self.interface.emc.refocusPhase = self.params.refocusing_rf_phase
         self.interface.emc.gradientRefocus = self._set_grad_for_emc(
             self.block_refocus.grad_slice.slice_select_amplitude
         )
-        self.interface.emc.durationRefocus = self.params.refocusingDuration
+        self.interface.emc.durationRefocus = self.params.refocusing_duration
         self.interface.emc.gradientCrush = self._set_grad_for_emc(self.block_refocus.grad_slice.amplitude[1])
         self.interface.emc.durationCrush = np.sum(np.diff(self.block_refocus.grad_slice.t_array_s[-4:])) * 1e6
         self.interface.emc.gradientRefocusVerse1 = 0.0
@@ -378,10 +379,10 @@ class Sequence(abc.ABC):
 
     # methods
     def _set_k_space(self):
-        if self.params.accelerationFactor > 1.1:
+        if self.params.acceleration_factor > 1.1:
             # calculate center of k space and indexes for full sampling band
-            k_central_phase = round(self.params.resolutionNPhase / 2)
-            k_half_central_lines = round(self.params.numberOfCentralLines / 2)
+            k_central_phase = round(self.params.resolution_n_phase / 2)
+            k_half_central_lines = round(self.params.number_central_lines / 2)
             # set indexes for start and end of full k space center sampling
             k_start = k_central_phase - k_half_central_lines
             k_end = k_central_phase + k_half_central_lines
@@ -395,45 +396,45 @@ class Sequence(abc.ABC):
             # calculate indexes
             k_remaining = np.arange(0, k_start)
             # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
-            weighting_factor = np.clip(self.params.sampleWeighting, 0.01, 1)
+            weighting_factor = np.clip(self.params.sample_weighting, 0.01, 1)
             if weighting_factor > 0.05:
                 log_module.info(f"\t\t-weighted random sampling of k-space phase encodes, factor: {weighting_factor}")
             # random encodes for different echoes - random choice weighted towards center
             weighting = np.clip(np.power(np.linspace(0, 1, k_start), weighting_factor), 1e-5, 1)
             weighting /= np.sum(weighting)
-            for idx_echo in range(self.params.ETL):
+            for idx_echo in range(self.params.etl):
                 # same encode for all echoes -> central lines
-                self.k_indexes[idx_echo, :self.params.numberOfCentralLines] = np.arange(k_start, k_end)
+                self.k_indexes[idx_echo, :self.params.number_central_lines] = np.arange(k_start, k_end)
 
                 k_indices = self.prng.choice(
                     k_remaining,
-                    size=self.params.numberOfOuterLines,
+                    size=self.params.number_outer_lines,
                     replace=False,
                     p=weighting
 
                 )
-                k_indices[::2] = self.params.resolutionNPhase - 1 - k_indices[::2]
-                self.k_indexes[idx_echo, self.params.numberOfCentralLines:] = np.sort(k_indices)
+                k_indices[::2] = self.params.resolution_n_phase - 1 - k_indices[::2]
+                self.k_indexes[idx_echo, self.params.number_central_lines:] = np.sort(k_indices)
         else:
             self.k_indexes[:, :] = np.arange(
-                self.params.numberOfCentralLines + self.params.numberOfOuterLines
+                self.params.number_central_lines + self.params.number_outer_lines
             )
 
     def _set_grad_for_emc(self, grad):
         return 1e3 / self.interface.specs.gamma * grad
 
     def _calculate_scan_time(self):
-        t_total = self.params.TR * 1e-3 * (
-                self.params.numberOfCentralLines + self.params.numberOfOuterLines
+        t_total = self.params.tr * 1e-3 * (
+                self.params.number_central_lines + self.params.number_outer_lines
         )
         log_module.info(f"\t\t-total scan time: {t_total / 60:.1f} min ({t_total:.1f} s)")
 
     def _set_delta_slices(self):
         # multi-slice
-        numSlices = self.params.resolutionNumSlices
+        numSlices = self.params.resolution_slice_num
         # cast from mm
         delta_z = self.params.z_extend * 1e-3
-        if self.params.interleavedAcquisition:
+        if self.params.interleaved_acquisition:
             log_module.info("\t\t-set interleaved acquisition")
             # want to go through the slices alternating from beginning and middle
             self.z.flat[:numSlices] = np.linspace((-delta_z / 2), (delta_z / 2), numSlices)
@@ -449,13 +450,13 @@ class Sequence(abc.ABC):
             self.trueSliceNum[idx_slice_num] = z_pos
 
     def _set_name_fov(self) -> str:
-        fov_r = int(self.params.resolutionFovRead)
-        fov_p = int(self.params.resolutionFovPhase / 100 * self.params.resolutionFovRead)
-        fov_s = int(self.params.resolutionSliceThickness * self.params.resolutionNumSlices)
+        fov_r = int(self.params.resolution_fov_read)
+        fov_p = int(self.params.resolution_fov_phase / 100 * self.params.resolution_fov_read)
+        fov_s = int(self.params.resolution_slice_thickness * self.params.resolution_slice_num)
         return f"fov{fov_r}-{fov_p}-{fov_s}"
 
     def _set_name_fa(self) -> str:
-        return f"fa{int(self.params.refocusingFA[0])}"
+        return f"fa{int(self.params.refocusing_rf_fa[0])}"
 
     def _plot_grad_moments(self, grad_moments: np.ndarray, dt_in_us: int):
         ids = ["gx"] * grad_moments.shape[1] + ["gy"] * grad_moments.shape[1] + ["gz"] * grad_moments.shape[1] + \

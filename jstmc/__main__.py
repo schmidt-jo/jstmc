@@ -57,7 +57,7 @@ def main():
         # utils.pretty_plot_et(seq, t_start=1e3 * scan_time / 2 - 2 * seq.interface.TR,
         #                      save=Path(options.RXV_Sequence.config.outputPath).absolute().joinpath("echo_train_semc"))
 
-        pyp_seq.plot(time_range=(0, 2e-3 * jstmc_seq.params.TR), time_disp='s')
+        pyp_seq.plot(time_range=(0, 2e-3 * jstmc_seq.params.tr), time_disp='s')
         # seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
 
 

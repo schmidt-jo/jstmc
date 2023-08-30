@@ -97,7 +97,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # calculate trajectory for pf readout
         self._register_k_trajectory(
             self.block_pf_acquisition.get_k_space_trajectory(
-                pre_read_area=grad_pre_area, fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
+                pre_read_area=grad_pre_area, fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read
             ),
             identifier=self.id_pf_acq
         )
@@ -106,7 +106,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         self._register_k_trajectory(
             self.block_gre_acq.get_k_space_trajectory(
                 pre_read_area=np.sum(self.block_refocus.grad_read.area) / 2,
-                fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
+                fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read
             ),
             identifier=self.id_gre_acq
         )
@@ -115,7 +115,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         self._register_k_trajectory(
             self.block_se_acq.get_k_space_trajectory(
                 pre_read_area=pre_area_se,
-                fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
+                fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read
             ),
             identifier=self.id_se_acq
         )
@@ -139,7 +139,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             x=self.block_gre_acq.grad_read.t_array_s,
             y=self.block_gre_acq.grad_read.amplitude
         )
-        spoil_area = self.params.readSpoilingFactor * readout_area
+        spoil_area = self.params.read_grad_spoiling_factor * readout_area
         # now we need to plug in new amplitude into spoiling read gradient
         t_sr = np.sum(
             np.diff(
@@ -230,16 +230,16 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         t_post_etl = self.block_gre_acq.get_duration() / 2 + self.block_spoil_end.get_duration()
         # total echo train length
         t_total_etl = (t_pre_etl + t_etl + t_post_etl) * 1e3  # esp in ms
-        max_num_slices = int(np.floor(self.params.TR / t_total_etl))
+        max_num_slices = int(np.floor(self.params.tr / t_total_etl))
         log_module.info(f"\t\t-total echo train length: {t_total_etl:.2f} ms")
-        log_module.info(f"\t\t-desired number of slices: {self.params.resolutionNumSlices}")
+        log_module.info(f"\t\t-desired number of slices: {self.params.resolution_slice_num}")
         log_module.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
-        if self.params.resolutionNumSlices > max_num_slices:
-            time_missing = (self.params.resolutionNumSlices - max_num_slices) * t_total_etl
+        if self.params.resolution_slice_num > max_num_slices:
+            time_missing = (self.params.resolution_slice_num - max_num_slices) * t_total_etl
             log_module.info(f"increase TR or Concatenation needed. - need {time_missing:.2f} ms more")
         self.delay_slice = events.DELAY.make_delay(
-            1e-3 * (self.params.TR - self.params.resolutionNumSlices * t_total_etl) /
-            self.params.resolutionNumSlices,
+            1e-3 * (self.params.tr - self.params.resolution_slice_num * t_total_etl) /
+            self.params.resolution_slice_num,
             system=self.pp_sys
         )
         log_module.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
@@ -277,7 +277,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                      self.t_delay_ref1_se1.get_duration() + t_ref1_gre1)
         self.te.append(te_1)
         self.te.append(te_1 + t_gre1_se1)
-        for k in np.arange(4, self.params.ETL * 3 + 1, 3):
+        for k in np.arange(4, self.params.etl * 3 + 1, 3):
             # take last echo time (gre sampling after se) need to add time from gre to rf and from rf to gre (equal)
             self.te.append(self.te[k - 1] + 2 * t_ref1_gre1)
             # take this time and add time between gre and se
@@ -294,9 +294,9 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # calculate flip angle as given
         flip = block.rf.t_duration_s / block.rf.signal.shape[0] * np.sum(np.abs(block.rf.signal)) * 2 * np.pi
         # take flip angle in radiants from options
-        fa_rad = self.params.refocusingRadFA[rf_idx]
+        fa_rad = self.params.refocusing_rf_rad_fa[rf_idx]
         # take phase as given in options
-        phase_rad = self.params.refocusingRadRfPhase[rf_idx]
+        phase_rad = self.params.refocusing_rf_rad_phase[rf_idx]
         # set block values
         block.rf.signal *= fa_rad / flip
         block.rf.phase_rad = phase_rad
@@ -389,11 +389,11 @@ class SeqVespaGerd(seq_baseclass.Sequence):
     def _loop_lines(self):
         # through phase encodes
         line_bar = tqdm.trange(
-            self.params.numberOfCentralLines + self.params.numberOfOuterLines, desc="phase encodes"
+            self.params.number_central_lines + self.params.number_outer_lines, desc="phase encodes"
         )
         scan_idx = 0
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
-            for idx_slice in range(self.params.resolutionNumSlices):
+            for idx_slice in range(self.params.resolution_slice_num):
                 echo_se_idx = 0
                 echo_gre_idx = 0
                 # apply slice offset for all kernels
@@ -434,7 +434,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                     scan_idx=scan_idx, echo_se_idx=echo_se_idx, echo_gre_idx=echo_gre_idx)
 
                 # successive double gre + mese in center
-                for echo_idx in np.arange(1, self.params.ETL):
+                for echo_idx in np.arange(1, self.params.etl):
                     # set flip angle from param list
                     self._set_fa(rf_idx=echo_idx)
                     # looping through slices per phase encode, set phase encode for ref 1

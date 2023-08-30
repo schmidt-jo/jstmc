@@ -55,7 +55,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         # set resolution downgrading for fid navs
         self.nav_num = 2
         # set so the in plane reso is 3 mm
-        self.nav_resolution_defactor: float = self.params.resolutionSliceThickness / 3
+        self.nav_resolution_defactor: float = self.params.resolution_slice_thickness / 3
 
         self.block_excitation_nav: kernels.Kernel = self._set_excitation_fid_nav()
         self.block_list_fid_nav_acq: list = self._set_acquisition_fid_nav()
@@ -77,7 +77,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         # calculate trajectory for pf readout
         self._register_k_trajectory(
             self.block_acquisition.get_k_space_trajectory(
-                pre_read_area=grad_pre_area, fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read
+                pre_read_area=grad_pre_area, fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read
             ),
             identifier=self.id_acq_se
         )
@@ -89,7 +89,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         self._register_k_trajectory(
             acq_nav_block.get_k_space_trajectory(
                 pre_read_area=grad_pre_area,
-                fs_grad_area=self.params.resolutionNRead * self.params.deltaK_read * self.nav_resolution_defactor
+                fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read * self.nav_resolution_defactor
             ),
             identifier=self.id_acq_nav
         )
@@ -97,8 +97,8 @@ class SeqJstmc(seq_baseclass.Sequence):
     # recon
     def _set_nav_parameters(self):
         self.interface.recon.set_navigator_params(
-            lines_per_nav=int(self.params.resolutionNPhase * self.nav_resolution_defactor / 2),
-            num_of_nav=self.params.numberOfCentralLines + self.params.numberOfOuterLines,
+            lines_per_nav=int(self.params.resolution_n_phase * self.nav_resolution_defactor / 2),
+            num_of_nav=self.params.number_central_lines + self.params.number_outer_lines,
             nav_acc_factor=2, nav_resolution_scaling=self.nav_resolution_defactor
         )
 
@@ -118,7 +118,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         # want to go center out. i.e:
         # acquire line [0, 1, -2, 3, -4, 5 ...] etc i.e. acc_factor_th of the lines + 1,
         pe_increments = np.arange(
-            1, int(self.params.resolutionNPhase * self.nav_resolution_defactor), acceleration_factor
+            1, int(self.params.resolution_n_phase * self.nav_resolution_defactor), acceleration_factor
         )
         pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
         # in general only nth of resolution
@@ -127,7 +127,7 @@ class SeqJstmc(seq_baseclass.Sequence):
             system=self.pp_sys,
             line_num=k,
             reso_degrading=self.nav_resolution_defactor
-        ) for k in range(int(self.params.resolutionNPhase * self.nav_resolution_defactor / 2))]
+        ) for k in range(int(self.params.resolution_n_phase * self.nav_resolution_defactor / 2))]
         # add spoiling
         block_fid_nav.append(self.block_spoil_end)
         # add delay
@@ -146,10 +146,10 @@ class SeqJstmc(seq_baseclass.Sequence):
         t_spoiling = np.sum(np.diff(k_ex.grad_slice.t_array_s[-4:]))
         t_spoiling_start = k_ex.grad_slice.t_array_s[-4]
         # get area
-        num_samples_per_read = int(self.params.resolutionNRead * self.nav_resolution_defactor)
+        num_samples_per_read = int(self.params.resolution_n_read * self.nav_resolution_defactor)
         grad_read_area = events.GRAD.make_trapezoid(
             channel=self.params.read_dir, system=self.pp_sys,
-            flat_area=num_samples_per_read * self.params.deltaK_read,
+            flat_area=num_samples_per_read * self.params.delta_k_read,
             flat_time=self.params.dwell * num_samples_per_read * self.params.oversampling
         ).area
         # need half of this area (includes ramps etc)
@@ -169,12 +169,12 @@ class SeqJstmc(seq_baseclass.Sequence):
                       self.block_refocus_1.rf.t_duration_s / 2 + self.block_acquisition.get_duration() / 2
         t_ref_2_adc = self.block_acquisition.get_duration() / 2 + self.block_refocus.get_duration() / 2
 
-        self.params.ESP = 2 * np.max([t_exci_ref, t_ref_1_adc, t_ref_2_adc]) * 1e3
-        logModule.info(f"\t\t-found minimum ESP: {self.params.ESP:.2f} ms")
+        self.params.esp = 2 * np.max([t_exci_ref, t_ref_1_adc, t_ref_2_adc]) * 1e3
+        logModule.info(f"\t\t-found minimum ESP: {self.params.esp:.2f} ms")
 
         if np.abs(t_ref_1_adc - t_ref_2_adc) > 1e-6:
             logModule.error(f"refocus to adc timing different from adc to refocus. Systematic error in seq. creation")
-        t_half_esp = self.params.ESP * 1e-3 / 2
+        t_half_esp = self.params.esp * 1e-3 / 2
         # add delays
         if t_exci_ref < t_half_esp:
             self.delay_exci_ref1 = events.DELAY.make_delay(t_half_esp - t_exci_ref, system=self.pp_sys)
@@ -186,13 +186,13 @@ class SeqJstmc(seq_baseclass.Sequence):
             if not self.delay_ref_adc.check_on_block_raster():
                 err = f"adc ref delay not on block raster"
                 logModule.error(err)
-        tes = np.arange(1, self.params.ETL + 1) * self.params.ESP
+        tes = np.arange(1, self.params.etl + 1) * self.params.esp
         self.te = tes.tolist()
 
     def _calculate_slice_delay(self):
         # time per echo train
         t_pre_etl = self.block_excitation.rf.t_delay_s + self.block_excitation.rf.t_duration_s / 2
-        t_etl = self.params.ETL * self.params.ESP * 1e-3  # esp in ms
+        t_etl = self.params.etl * self.params.esp * 1e-3  # esp in ms
         t_post_etl = self.block_acquisition.get_duration() / 2 + self.block_spoil_end.get_duration()
 
         t_total_etl = t_pre_etl + t_etl + t_post_etl
@@ -204,16 +204,16 @@ class SeqJstmc(seq_baseclass.Sequence):
         )
         logModule.info(f"\t\t-total fid-nav time (2 navs + 1 delay of 10ms): {t_total_fid_nav * 1e3:.2f} ms")
         # deminish TR by FIDnavs
-        tr_eff = self.params.TR * 1e-3 - t_total_fid_nav
+        tr_eff = self.params.tr * 1e-3 - t_total_fid_nav
         max_num_slices = int(np.floor(tr_eff / t_total_etl))
         logModule.info(f"\t\t-total echo train length: {t_total_etl * 1e3:.2f} ms")
-        logModule.info(f"\t\t-desired number of slices: {self.params.resolutionNumSlices}")
+        logModule.info(f"\t\t-desired number of slices: {self.params.resolution_slice_num}")
         logModule.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
-        if self.params.resolutionNumSlices > max_num_slices:
+        if self.params.resolution_slice_num > max_num_slices:
             logModule.info(f"increase TR or Concatenation needed")
         # we want to add a delay additionally after fid nav block
         self.delay_slice = events.DELAY.make_delay(
-            (tr_eff - self.params.resolutionNumSlices * t_total_etl) / (self.params.resolutionNumSlices + 1),
+            (tr_eff - self.params.resolution_slice_num * t_total_etl) / (self.params.resolution_slice_num + 1),
             system=self.pp_sys
         )
         logModule.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
@@ -230,12 +230,12 @@ class SeqJstmc(seq_baseclass.Sequence):
     def _loop_lines(self):
         # through phase encodes
         line_bar = tqdm.trange(
-            self.params.numberOfCentralLines + self.params.numberOfOuterLines, desc="phase encodes"
+            self.params.number_central_lines + self.params.number_outer_lines, desc="phase encodes"
         )
         # counter for number of scan
         scan_idx = 0
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
-            for idx_slice in range(self.params.resolutionNumSlices):
+            for idx_slice in range(self.params.resolution_slice_num):
                 # looping through slices per phase encode
                 self._set_fa(echo_idx=0)
                 self._set_phase_grad(phase_idx=idx_n, echo_idx=0)
@@ -271,7 +271,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                     self.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
 
                 # loop
-                for echo_idx in np.arange(1, self.params.ETL):
+                for echo_idx in np.arange(1, self.params.etl):
                     # set fa
                     self._set_fa(echo_idx=echo_idx)
                     # set phase
@@ -311,9 +311,9 @@ class SeqJstmc(seq_baseclass.Sequence):
                 # epi style nav read
                 # we set up a counter to track the phase encode line, k-space center is half of num lines
                 line_counter = 0
-                central_line = int(self.params.resolutionNPhase * self.nav_resolution_defactor / 2) - 1
+                central_line = int(self.params.resolution_n_phase * self.nav_resolution_defactor / 2) - 1
                 # we set up the pahse encode increments
-                pe_increments = np.arange(1, int(self.params.resolutionNPhase * self.nav_resolution_defactor), 2)
+                pe_increments = np.arange(1, int(self.params.resolution_n_phase * self.nav_resolution_defactor), 2)
                 pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
                 # we loop through all fid nav blocks (whole readout)
                 for b_idx in range(self.block_list_fid_nav_acq.__len__()):
@@ -344,8 +344,8 @@ class SeqJstmc(seq_baseclass.Sequence):
         else:
             sbb = self.block_refocus
         flip = sbb.rf.t_duration_s / sbb.rf.signal.shape[0] * np.sum(np.abs(sbb.rf.signal)) * 2 * np.pi
-        fa_rad = self.params.refocusingRadFA[echo_idx]
-        phase_rad = self.params.refocusingRadRfPhase[echo_idx]
+        fa_rad = self.params.refocusing_rf_rad_fa[echo_idx]
+        phase_rad = self.params.refocusing_rf_rad_phase[echo_idx]
         sbb.rf.signal *= fa_rad / flip
         sbb.rf.phase_rad = phase_rad
 
