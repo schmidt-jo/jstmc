@@ -70,7 +70,9 @@ class Kernel:
             log_module.error(err)
             raise AttributeError(err)
         # find starting point of adc
-        t_start = self.adc.t_delay_s
+        # From Pulseq: According to the information from Klaus Scheffler and indirectly from Siemens this
+        # is the present convention - the samples are shifted by 0.5 dwell
+        t_start = self.adc.t_delay_s + self.adc.t_dwell_s / 2
         # set adc sampling point times
         t_adc_sampling = np.arange(self.adc.num_samples) * self.adc.t_dwell_s
         # interpolate grad amp values for adc positions
@@ -91,6 +93,7 @@ class Kernel:
         area_pre = pre_read_area + np.trapz(grad_amps_pre, t_pre)
         # first adc position is at t_start, then we sample each dwell time in between the grad might change
         # hence we want to calculate the area between each step
+
         grad_areas_for_t_adc = np.zeros_like(grad_amp_for_t_adc)
         for amp_idx in np.arange(1, grad_areas_for_t_adc.shape[0]):
             grad_areas_for_t_adc[amp_idx] = grad_areas_for_t_adc[amp_idx - 1] + np.trapz(
