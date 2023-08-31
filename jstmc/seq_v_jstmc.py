@@ -81,18 +81,23 @@ class SeqJstmc(seq_baseclass.Sequence):
             ),
             identifier=self.id_acq_se
         )
-        # pick some nav acquisition
-        acq_num = 2
-        acq_nav_block = self.block_list_fid_nav_acq[acq_num]
-        # get pre area
-        grad_pre_area = np.sum(self.block_list_fid_nav_acq[acq_num - 1].grad_read.area) / 2
-        self._register_k_trajectory(
-            acq_nav_block.get_k_space_trajectory(
-                pre_read_area=grad_pre_area,
-                fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read * self.nav_resolution_defactor
-            ),
-            identifier=self.id_acq_nav
-        )
+        # need 3 trajectory lines for navigators: first echo (comes from excitation pre-grad) and
+        # plus + minus directions
+        grad_pre_area = 0
+        for i in range(3):
+            acq_nav_block = self.block_list_fid_nav_acq[i]
+            if i == 0:
+                # get pre area
+                grad_pre_area += np.sum(self.block_excitation_nav.grad_read.area)
+            else:
+                grad_pre_area += np.sum(self.block_list_fid_nav_acq[i - 1].grad_read.area)
+            self._register_k_trajectory(
+                acq_nav_block.get_k_space_trajectory(
+                    pre_read_area=grad_pre_area,
+                    fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read * self.nav_resolution_defactor
+                ),
+                identifier=f"{self.id_acq_nav}_{i}"
+            )
 
     # recon
     def _set_nav_parameters(self):
@@ -327,13 +332,18 @@ class SeqJstmc(seq_baseclass.Sequence):
                     else:
                         self.pp_seq.add_block(*b.list_events_to_ns())
                     # if we have a readout we write to sampling pattern file
+                    # for navigators we want the 0th to have identifier 0, all minus directions have 1, all plus have 2
+                    if b_idx == 0:
+                        nav_ident = 0
+                    else:
+                        nav_ident = int(b_idx % 2) + 1
                     if b.adc.get_duration() > 0:
-                        nav_read_dir = np.sign(b.grad_read.amplitude[1])
                         # track which line we are writing from the incremental steps
                         nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
                         scan_idx, _ = self._write_sampling_pattern_entry(
-                            scan_num=scan_idx, slice_num=nav_idx, nav_dir=nav_read_dir, nav_acq=True,
-                            pe_num=nav_line_pe, echo_num=-1, acq_type=self.id_acq_nav
+                            scan_num=scan_idx, slice_num=nav_idx, nav_acq=True,
+                            pe_num=nav_line_pe, echo_num=0, acq_type=f"{self.id_acq_nav}_{nav_ident}",
+                            echo_type="gre-fid"
                         )
                         line_counter += 1
 

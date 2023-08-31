@@ -11,6 +11,9 @@ def main():
     logging.basicConfig(format='%(asctime)s %(levelname)s :: %(name)s -- %(message)s',
                         datefmt='%I:%M:%S', level=logging.INFO)
 
+    logging.info("______ jstmc pypulseq sequence creation ______")
+    logging.info("______________________________________________")
+
     prog_args = options.create_cli()
 
     logging.info("Starting sequence build")

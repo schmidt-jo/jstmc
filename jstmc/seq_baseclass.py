@@ -265,7 +265,7 @@ class Sequence(abc.ABC):
         self._sampling_pattern_constr.append({
             "scan_num": scan_num, "slice_num": slice_num, "pe_num": pe_num, "acq_type": acq_type,
             "echo_num": echo_num, "echo_type": echo_type, "echo_type_num": echo_type_num,
-            "nav_acq": nav_acq, "nav_dir": nav_dir
+            "nav_acq": nav_acq
         })
         return scan_num + 1, echo_type_num + 1
 

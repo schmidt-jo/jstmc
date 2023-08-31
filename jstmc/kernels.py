@@ -314,15 +314,16 @@ class Kernel:
             area=pyp_interface.delta_k_phase * pe_increments[line_num],
             system=system
         )
-        acquisition_window = set_on_grad_raster_time(
-            system=system,
-            time=pyp_interface.dwell * num_samples_per_read * pyp_interface.oversampling + system.adc_dead_time
-        )
+        # acquisition_window = set_on_grad_raster_time(
+        #     system=system,
+        #     time=pyp_interface.dwell * num_samples_per_read * pyp_interface.oversampling + system.adc_dead_time
+        # )
         log_module.debug(f" pe line: {np.sum(pe_increments[:line_num])}")
         grad_read = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir,
             flat_area=np.power(-1, line_num) * pyp_interface.delta_k_read * num_samples_per_read,
-            flat_time=acquisition_window,  # given in [s] via options
+            flat_time=pyp_interface.dwell * num_samples_per_read * pyp_interface.oversampling,
+            # given in [s] via options
             system=system
         )
         adc = events.ADC.make_adc(
