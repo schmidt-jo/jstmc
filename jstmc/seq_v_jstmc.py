@@ -81,23 +81,43 @@ class SeqJstmc(seq_baseclass.Sequence):
             ),
             identifier=self.id_acq_se
         )
-        # need 3 trajectory lines for navigators: first echo (comes from excitation pre-grad) and
-        # plus + minus directions
-        grad_pre_area = 0
-        for i in range(3):
-            acq_nav_block = self.block_list_fid_nav_acq[i]
-            if i == 0:
-                # get pre area
-                grad_pre_area += np.sum(self.block_excitation_nav.grad_read.area)
-            else:
-                grad_pre_area += np.sum(self.block_list_fid_nav_acq[i - 1].grad_read.area)
-            self._register_k_trajectory(
-                acq_nav_block.get_k_space_trajectory(
-                    pre_read_area=grad_pre_area,
-                    fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read * self.nav_resolution_defactor
-                ),
-                identifier=f"{self.id_acq_nav}_{i}"
-            )
+        # need 2 trajectory lines for navigators: plus + minus directions
+        # sanity check that pre-phasing for odd and even read lines are same, i.e. cycling correct
+        grad_read_exc_pre = np.sum(self.block_excitation_nav.grad_read.area)
+        grad_read_2nd_pre = grad_read_exc_pre + np.sum(
+            self.block_list_fid_nav_acq[0].grad_read.area
+        )
+        grad_read_3rd_pre = grad_read_2nd_pre + np.sum(self.block_list_fid_nav_acq[1].grad_read.area)
+        grad_read_4th_pre = grad_read_3rd_pre + np.sum(
+            self.block_list_fid_nav_acq[2].grad_read.area
+        )
+        if np.abs(grad_read_exc_pre - grad_read_3rd_pre) > 1e-9:
+            err = f"navigator readout prephasing gradients of odd echoes do not coincide"
+            logModule.error(err)
+            raise ValueError(err)
+        if np.abs(grad_read_2nd_pre - grad_read_4th_pre) > 1e-9:
+            err = f"navigator readout prephasing gradients of even echoes do not coincide"
+            logModule.error(err)
+            raise ValueError(err)
+        # register trajectories
+        # odd
+        acq_nav_block = self.block_list_fid_nav_acq[0]
+        self._register_k_trajectory(
+            acq_nav_block.get_k_space_trajectory(
+                pre_read_area=grad_read_exc_pre,
+                fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read * self.nav_resolution_defactor
+            ),
+            identifier=f"{self.id_acq_nav}_odd"
+        )
+        # even
+        acq_nav_block = self.block_list_fid_nav_acq[1]
+        self._register_k_trajectory(
+            acq_nav_block.get_k_space_trajectory(
+                pre_read_area=grad_read_2nd_pre,
+                fs_grad_area=self.params.resolution_n_read * self.params.delta_k_read * self.nav_resolution_defactor
+            ),
+            identifier=f"{self.id_acq_nav}_even"
+        )
 
     # recon
     def _set_nav_parameters(self):
@@ -105,7 +125,7 @@ class SeqJstmc(seq_baseclass.Sequence):
             lines_per_nav=int(self.params.resolution_n_phase * self.nav_resolution_defactor / 2),
             num_of_nav=self.params.number_central_lines + self.params.number_outer_lines,
             nav_acc_factor=2, nav_resolution_scaling=self.nav_resolution_defactor,
-            num_of_navs_per_tr=2, os_factor=self.params.oversampling
+            num_of_navs_per_tr=2
         )
 
     # emc
@@ -333,10 +353,10 @@ class SeqJstmc(seq_baseclass.Sequence):
                         self.pp_seq.add_block(*b.list_events_to_ns())
                     # if we have a readout we write to sampling pattern file
                     # for navigators we want the 0th to have identifier 0, all minus directions have 1, all plus have 2
-                    if b_idx == 0:
-                        nav_ident = 0
+                    if b_idx % 2:
+                        nav_ident = "odd"
                     else:
-                        nav_ident = int(b_idx % 2) + 1
+                        nav_ident = "even"
                     if b.adc.get_duration() > 0:
                         # track which line we are writing from the incremental steps
                         nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
