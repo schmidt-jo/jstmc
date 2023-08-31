@@ -380,12 +380,16 @@ class Kernel:
         area_ramp = grad_read_fs.amplitude[1] * grad_read_fs.t_array_s[1] * 0.5
         area_pre_read = (1 - 0.5 / pf_factor) * grad_read_fs.flat_area + area_ramp
 
-        if grad_read_fs.t_array_s[1] < system.adc_dead_time:
+        adc_duration = int(num_acq_pts * pyp_interface.oversampling) * pyp_interface.dwell
+        adc_delay = (acq_time_fs - adc_duration) / 2    # distribute duration difference from raster time differences
+        # add ramp
+        adc_delay += grad_read_fs.t_array_s[1]
+        if adc_delay < system.adc_dead_time:
             warn = f"adc delay will be bigger than set, due to system dead time constraints"
             log_module.warning(warn)
         adc = events.ADC.make_adc(
             system=system, num_samples=int(num_acq_pts * pyp_interface.oversampling),
-            delay_s=grad_read_fs.t_array_s[1], dwell=pyp_interface.dwell
+            delay_s=adc_delay, dwell=pyp_interface.dwell
         )
         acq_block = cls()
         acq_block.grad_read = grad_read_fs
