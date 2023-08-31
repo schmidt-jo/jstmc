@@ -291,11 +291,18 @@ class Kernel:
             dwell=pyp_interface.dwell,
             system=system
         )
-        delay = (grad_read.get_duration() - adc.get_duration()) / 2
+        delay = (grad_read.get_duration() - adc.t_duration_s) / 2
         if delay < 0:
             err = f"adc longer than read gradient"
             log_module.error(err)
             raise ValueError(err)
+        # delay remains dead time if its bigger
+        if delay > system.adc_dead_time:
+            adc.t_delay_s = delay
+        else:
+            warn = "cant set adc delay to match read gradient bc its smaller than adc dead time."
+            log_module.warning(warn)
+        # want to set adc symmetrically into grad read
         adc.t_delay_s = delay
         # finished block
         return cls(adc=adc, grad_read=grad_read)
@@ -373,6 +380,9 @@ class Kernel:
         area_ramp = grad_read_fs.amplitude[1] * grad_read_fs.t_array_s[1] * 0.5
         area_pre_read = (1 - 0.5 / pf_factor) * grad_read_fs.flat_area + area_ramp
 
+        if grad_read_fs.t_array_s[1] < system.adc_dead_time:
+            warn = f"adc delay will be bigger than set, due to system dead time constraints"
+            log_module.warning(warn)
         adc = events.ADC.make_adc(
             system=system, num_samples=int(num_acq_pts * pyp_interface.oversampling),
             delay_s=grad_read_fs.t_array_s[1], dwell=pyp_interface.dwell
@@ -520,9 +530,19 @@ class Kernel:
             grad_read.area = - grad_read.area
             grad_read.flat_area = - grad_read.flat_area
 
-        t_delay = 0.5 * (grad_read.get_duration() - adc.get_duration())
+        delay = (grad_read.get_duration() - adc.t_duration_s) / 2
+        if delay < 0:
+            err = f"adc longer than read gradient"
+            log_module.error(err)
+            raise ValueError(err)
+        # delay remains dead time if its bigger
+        if delay > system.adc_dead_time:
+            adc.t_delay_s = delay
+        else:
+            warn = "cant set adc delay to match read gradient bc its smaller than adc dead time."
+            log_module.warning(warn)
         # want to set adc symmetrically into grad read
-        adc.t_delay_s = t_delay
+        adc.t_delay_s = delay
         adc.set_on_raster()
         acq = Kernel(grad_read=grad_read, adc=adc)
 
