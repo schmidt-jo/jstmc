@@ -317,6 +317,7 @@ class Kernel:
             area=pyp_interface.delta_k_phase * pe_increments[line_num],
             system=system
         )
+        # adc needs at least dead time upon switch on
         # acquisition_window = set_on_grad_raster_time(
         #     system=system,
         #     time=pyp_interface.dwell * num_samples_per_read * pyp_interface.oversampling + system.adc_dead_time
@@ -334,12 +335,17 @@ class Kernel:
             dwell=pyp_interface.dwell,
             system=system
         )
-        delay = (grad_read.get_duration() - adc.get_duration()) / 2
+        delay = (grad_read.get_duration() - adc.t_duration_s) / 2
         if delay < 0:
             err = f"adc longer than read gradient"
             log_module.error(err)
             raise ValueError(err)
-        adc.t_delay_s = delay
+        # delay remains dead time if its bigger
+        if delay > system.adc_dead_time:
+            adc.t_delay_s = delay
+        else:
+            warn = "cant set adc delay to match read gradient bc its smaller than adc dead time."
+            log_module.warning(warn)
         # get duration of adc and start phase blip when adc is over (possibly during ramp of read)
         grad_phase.t_delay_s = grad_phase.set_on_raster(adc.get_duration(), double=False)
         # finished block
@@ -699,7 +705,7 @@ class Kernel:
             fig.update_yaxes(title_text="ADV on/off", secondary_y=False, range=[0, 2],
                              tickmode="array", tickvals=[0, 1, 2], ticktext=["Off", "On", ""])
             fig.update_yaxes(title_text="Gradient Amplitude [mT/m]", secondary_y=True)
-            fig.update_xaxes(title_text="Time [\u00B5]")
+            fig.update_xaxes(title_text="Time [\u00B5s]")
 
         fig_path = plib.Path(path).absolute().joinpath("plots/")
         fig_path.mkdir(parents=True, exist_ok=True)
