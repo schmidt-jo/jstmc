@@ -73,7 +73,7 @@ class SeqJstmc(seq_baseclass.Sequence):
     # sampling + k traj
     def _set_k_trajectories(self):
         # read direction is always fully oversampled, no trajectories to register
-        grad_pre_area = float(np.sum(self.block_excitation.grad_read.area))
+        grad_pre_area = float(np.sum(self.block_refocus.grad_read.area) / 2)
         # calculate trajectory for pf readout
         self._register_k_trajectory(
             self.block_acquisition.get_k_space_trajectory(
