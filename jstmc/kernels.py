@@ -274,21 +274,21 @@ class Kernel:
             return _instance
 
     @classmethod
-    def acquisition_fs(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts):
+    def acquisition_fs(cls, pyp_params: pypsi.Params.pypulseq, system: pp.Opts):
         # block : adc + read grad
         log_module.info("setup acquisition")
         acquisition_window = set_on_grad_raster_time(
-            system=system, time=pyp_interface.acquisition_time + system.adc_dead_time
+            system=system, time=pyp_params.acquisition_time + system.adc_dead_time
         )
         grad_read = events.GRAD.make_trapezoid(
-            channel=pyp_interface.read_dir,
-            flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read,
+            channel=pyp_params.read_dir,
+            flat_area=pyp_params.delta_k_read * pyp_params.resolution_n_read,
             flat_time=acquisition_window,  # given in [s] via options
             system=system
         )
         adc = events.ADC.make_adc(
-            num_samples=int(pyp_interface.resolution_n_read * pyp_interface.oversampling),
-            dwell=pyp_interface.dwell,
+            num_samples=int(pyp_params.resolution_n_read * pyp_params.oversampling),
+            dwell=pyp_params.dwell,
             system=system
         )
         delay = (grad_read.get_duration() - adc.t_duration_s) / 2

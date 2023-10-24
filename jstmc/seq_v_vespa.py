@@ -27,20 +27,30 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # add id
         self.id_pf_acq: str = "gre_us_pf"
 
-        # undersampled readout with symmetrical accelerated sidelobes
-        self.block_se_acq, self.acc_factor_us_read = Kernel.acquisition_sym_undersampled(
-            pyp_interface=self.params, system=self.pp_sys
+        # # undersampled readout with symmetrical accelerated sidelobes
+        # self.block_se_acq, self.acc_factor_us_read = Kernel.acquisition_sym_undersampled(
+        #     pyp_interface=self.params, system=self.pp_sys
+        # )
+        # for now lets go with a fs readout, takes more time but for proof of concept easier
+        self.block_se_acq = Kernel.acquisition_fs(
+            pyp_params=self.params, system=self.pp_sys
         )
         # add id
-        self.id_se_acq: str = "se_us_sym"
+        self.id_se_acq: str = "se_fs"
 
         # gradient echo readouts, always have inverted gradient direction wrt to se readouts,
         # - inverted gradient, k-space from right to left
-        self.block_gre_acq, _ = Kernel.acquisition_sym_undersampled(
-            pyp_interface=self.params, system=self.pp_sys, invert_grad_dir=True
+        # self.block_gre_acq, _ = Kernel.acquisition_sym_undersampled(
+        #     pyp_interface=self.params, system=self.pp_sys, invert_grad_dir=True
+        # )
+        self.block_gre_acq = Kernel.acquisition_fs(
+            pyp_params=self.params, system=self.pp_sys
         )
+        # invert gradient
+        self.block_gre_acq.grad_read.area = - self.block_gre_acq.grad_read.area
+        self.block_gre_acq.grad_read.amplitude = - self.block_gre_acq.grad_read.amplitude
         # add id
-        self.id_gre_acq: str = "gre_us_sym"
+        self.id_gre_acq: str = "gre_fs"
 
         # spoiling at end of echo train
         self.block_spoil_end: Kernel = Kernel.spoil_all_grads(
@@ -79,8 +89,8 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             self.block_refocus_first.plot(path=self.interface.config.output_path, name="refocus-first")
             self.block_refocus.plot(path=self.interface.config.output_path, name="refocus")
             self.block_pf_acquisition.plot(path=self.interface.config.output_path, name="partial-fourier-acqusisition")
-            self.block_se_acq.plot(path=self.interface.config.output_path, name="undersampled-acquisition")
-            self.block_gre_acq.plot(path=self.interface.config.output_path, name="undersampled-gre-acq")
+            self.block_se_acq.plot(path=self.interface.config.output_path, name="se-acquisition")
+            self.block_gre_acq.plot(path=self.interface.config.output_path, name="gre-acquisition")
 
         # ToDo:
         # as is now all gesse readouts sample the same phase encode lines as the spin echoes.
@@ -358,32 +368,35 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # add gre sampling
         self.pp_seq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
-        scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(
-            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop],
-            pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
-            echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx,
-            acq_type=self.id_gre_acq
-        )
+        scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                    slice_num=self.trueSliceNum[idx_slice_loop],
+                                                                    pe_num=self.k_indexes[
+                                                                        phase_encode_echo, idx_pe_loop],
+                                                                    echo_num=echo_gre_idx + echo_se_idx,
+                                                                    acq_type=self.id_gre_acq, echo_type="gre",
+                                                                    echo_type_num=echo_gre_idx)
 
         # add se sampling
         self.pp_seq.add_block(*self.block_se_acq.list_events_to_ns())
         # write sampling pattern
-        scan_idx, echo_se_idx = self._write_sampling_pattern_entry(
-            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop],
-            pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
-            echo_num=echo_gre_idx + echo_se_idx, echo_type="se", echo_type_num=echo_se_idx,
-            acq_type=self.id_se_acq
-        )
+        scan_idx, echo_se_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                   slice_num=self.trueSliceNum[idx_slice_loop],
+                                                                   pe_num=self.k_indexes[
+                                                                       phase_encode_echo, idx_pe_loop],
+                                                                   echo_num=echo_gre_idx + echo_se_idx,
+                                                                   acq_type=self.id_se_acq, echo_type="se",
+                                                                   echo_type_num=echo_se_idx)
 
         # add gre sampling
         self.pp_seq.add_block(*self.block_gre_acq.list_events_to_ns())
         # write sampling pattern
-        scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(
-            scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice_loop],
-            pe_num=self.k_indexes[phase_encode_echo, idx_pe_loop],
-            echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx,
-            acq_type=self.id_gre_acq
-        )
+        scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                    slice_num=self.trueSliceNum[idx_slice_loop],
+                                                                    pe_num=self.k_indexes[
+                                                                        phase_encode_echo, idx_pe_loop],
+                                                                    echo_num=echo_gre_idx + echo_se_idx,
+                                                                    acq_type=self.id_gre_acq, echo_type="gre",
+                                                                    echo_type_num=echo_gre_idx)
         return scan_idx, echo_se_idx, echo_gre_idx
 
     def _loop_lines(self):
@@ -408,11 +421,12 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                 # 0th echo sampling
                 self.pp_seq.add_block(*self.block_pf_acquisition.list_events_to_ns())
                 # write sampling pattern
-                scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(
-                    scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice], pe_num=self.k_indexes[0, idx_n],
-                    echo_num=echo_gre_idx + echo_se_idx, echo_type="gre", echo_type_num=echo_gre_idx,
-                    acq_type=self.id_pf_acq
-                )
+                scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                            slice_num=self.trueSliceNum[idx_slice],
+                                                                            pe_num=self.k_indexes[0, idx_n],
+                                                                            echo_num=echo_gre_idx + echo_se_idx,
+                                                                            acq_type=self.id_pf_acq, echo_type="gre",
+                                                                            echo_type_num=echo_gre_idx)
                 # delay if necessary
                 if self.t_delay_e0_ref1.get_duration() > 1e-7:
                     self.pp_seq.add_block(self.t_delay_e0_ref1.to_simple_ns())

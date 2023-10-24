@@ -25,8 +25,11 @@ class SeqJstmc(seq_baseclass.Sequence):
             system=self.pp_sys,
             pulse_num=0
         )
-        ramp_area_ref_1 = self.block_refocus_1.grad_slice.t_array_s[1] * self.block_refocus_1.grad_slice.amplitude[
-            1] / 2.0
+        # calculate ramp area to slice select upon refocusing 1
+        ramp_area_ref_1 = np.trapz(
+            x=self.block_refocus_1.grad_slice.t_array_s[:2],
+            y=self.block_refocus_1.grad_slice.amplitude[:2]
+        )
 
         self.block_excitation = kernels.Kernel.excitation_slice_sel(
             pyp_interface=self.params,
@@ -35,7 +38,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         )
 
         self.block_acquisition: kernels.Kernel = kernels.Kernel.acquisition_fs(
-            pyp_interface=self.params,
+            pyp_params=self.params,
             system=self.pp_sys
         )
         self.id_acq_se = "fs_acq"
@@ -287,10 +290,10 @@ class SeqJstmc(seq_baseclass.Sequence):
                 # adc
                 self.pp_seq.add_block(*self.block_acquisition.list_events_to_ns())
                 # write sampling pattern
-                scan_idx, _ = self._write_sampling_pattern_entry(
-                    scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice], pe_num=self.k_indexes[0, idx_n],
-                    echo_num=0, acq_type=self.id_acq_se
-                )
+                scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                 slice_num=self.trueSliceNum[idx_slice],
+                                                                 pe_num=self.k_indexes[0, idx_n], echo_num=0,
+                                                                 acq_type=self.id_acq_se)
 
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
@@ -313,11 +316,10 @@ class SeqJstmc(seq_baseclass.Sequence):
                     # adc
                     self.pp_seq.add_block(*self.block_acquisition.list_events_to_ns())
                     # write sampling pattern
-                    scan_idx, _ = self._write_sampling_pattern_entry(
-                        scan_num=scan_idx, slice_num=self.trueSliceNum[idx_slice],
-                        pe_num=self.k_indexes[echo_idx, idx_n], echo_num=echo_idx,
-                        acq_type=self.id_acq_se
-                    )
+                    scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                     slice_num=self.trueSliceNum[idx_slice],
+                                                                     pe_num=self.k_indexes[echo_idx, idx_n],
+                                                                     echo_num=echo_idx, acq_type=self.id_acq_se)
 
                     # delay if necessary
                     if self.delay_ref_adc.get_duration() > 1e-7:
@@ -360,11 +362,10 @@ class SeqJstmc(seq_baseclass.Sequence):
                     if b.adc.get_duration() > 0:
                         # track which line we are writing from the incremental steps
                         nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
-                        scan_idx, _ = self._write_sampling_pattern_entry(
-                            scan_num=scan_idx, slice_num=nav_idx, nav_acq=True,
-                            pe_num=nav_line_pe, echo_num=0, acq_type=f"{self.id_acq_nav}_{nav_ident}",
-                            echo_type="gre-fid"
-                        )
+                        scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx, slice_num=nav_idx,
+                                                                         pe_num=nav_line_pe, echo_num=0,
+                                                                         acq_type=f"{self.id_acq_nav}_{nav_ident}",
+                                                                         echo_type="gre-fid", nav_acq=True)
                         line_counter += 1
 
         logModule.info(f"sequence built!")
