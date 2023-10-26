@@ -325,15 +325,15 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # caution we assume trapezoidal phase encode gradients
         area_factors = np.array([0.5, 1.0, 0.5])
         # we get the actual line index from the sampling pattern, dependent on echo number and phase index in the loop
-        idx_phase = self.k_indexes[echo_idx, phase_idx]
+        idx_phase = self.k_pe_indexes[echo_idx, phase_idx]
         # additionally we need the last blocks phase encode for rephasing
         if echo_idx > 0:
             # if we are not on the first readout:
             # we need the last phase encode value to reset before refocusing
-            last_idx_phase = self.k_indexes[echo_idx - 1, phase_idx]
+            last_idx_phase = self.k_pe_indexes[echo_idx - 1, phase_idx]
         else:
             # we need the phase encode from the 0th echo, as is now it is also encoded like the refocused se readout
-            last_idx_phase = self.k_indexes[echo_idx, phase_idx]
+            last_idx_phase = self.k_pe_indexes[echo_idx, phase_idx]
 
         # we choose the block based on position in the echo train
         if excitation:
@@ -370,7 +370,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                     slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                    pe_num=self.k_indexes[
+                                                                    pe_num=self.k_pe_indexes[
                                                                         phase_encode_echo, idx_pe_loop],
                                                                     echo_num=echo_gre_idx + echo_se_idx,
                                                                     acq_type=self.id_gre_acq, echo_type="gre",
@@ -381,7 +381,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # write sampling pattern
         scan_idx, echo_se_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                    slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                   pe_num=self.k_indexes[
+                                                                   pe_num=self.k_pe_indexes[
                                                                        phase_encode_echo, idx_pe_loop],
                                                                    echo_num=echo_gre_idx + echo_se_idx,
                                                                    acq_type=self.id_se_acq, echo_type="se",
@@ -392,7 +392,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                     slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                    pe_num=self.k_indexes[
+                                                                    pe_num=self.k_pe_indexes[
                                                                         phase_encode_echo, idx_pe_loop],
                                                                     echo_num=echo_gre_idx + echo_se_idx,
                                                                     acq_type=self.id_gre_acq, echo_type="gre",
@@ -423,7 +423,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                 # write sampling pattern
                 scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                             slice_num=self.trueSliceNum[idx_slice],
-                                                                            pe_num=self.k_indexes[0, idx_n],
+                                                                            pe_num=self.k_pe_indexes[0, idx_n],
                                                                             echo_num=echo_gre_idx + echo_se_idx,
                                                                             acq_type=self.id_pf_acq, echo_type="gre",
                                                                             echo_type_num=echo_gre_idx)

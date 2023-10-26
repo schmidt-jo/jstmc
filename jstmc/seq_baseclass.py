@@ -33,7 +33,7 @@ class Sequence(abc.ABC):
 
         self.trueSliceNum = np.zeros(self.num_slices, dtype=int)
         # k space
-        self.k_indexes: np.ndarray = np.zeros(
+        self.k_pe_indexes: np.ndarray = np.zeros(
             (self.params.etl,
              self.params.number_central_lines + self.params.number_outer_lines
              ),
@@ -409,7 +409,7 @@ class Sequence(abc.ABC):
             weighting /= np.sum(weighting)
             for idx_echo in range(self.params.etl):
                 # same encode for all echoes -> central lines
-                self.k_indexes[idx_echo, :self.params.number_central_lines] = np.arange(k_start, k_end)
+                self.k_pe_indexes[idx_echo, :self.params.number_central_lines] = np.arange(k_start, k_end)
 
                 k_indices = self.prng.choice(
                     k_remaining,
@@ -419,9 +419,9 @@ class Sequence(abc.ABC):
 
                 )
                 k_indices[::2] = self.params.resolution_n_phase - 1 - k_indices[::2]
-                self.k_indexes[idx_echo, self.params.number_central_lines:] = np.sort(k_indices)
+                self.k_pe_indexes[idx_echo, self.params.number_central_lines:] = np.sort(k_indices)
         else:
-            self.k_indexes[:, :] = np.arange(
+            self.k_pe_indexes[:, :] = np.arange(
                 self.params.number_central_lines + self.params.number_outer_lines
             )
 

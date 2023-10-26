@@ -4,13 +4,13 @@ import numpy as np
 import logging
 import tqdm
 
-logModule = logging.getLogger(__name__)
+log_module = logging.getLogger(__name__)
 
 
 class SeqJstmc(seq_baseclass.Sequence):
     def __init__(self, pypsi_params: pypsi.Params = pypsi.Params()):
         super().__init__(pypsi_params=pypsi_params)
-        logModule.info(f"init jstmc algorithm")
+        log_module.info(f"init jstmc algorithm")
 
         # timing
         self.esp: float = 0.0
@@ -96,11 +96,11 @@ class SeqJstmc(seq_baseclass.Sequence):
         )
         if np.abs(grad_read_exc_pre - grad_read_3rd_pre) > 1e-9:
             err = f"navigator readout prephasing gradients of odd echoes do not coincide"
-            logModule.error(err)
+            log_module.error(err)
             raise ValueError(err)
         if np.abs(grad_read_2nd_pre - grad_read_4th_pre) > 1e-9:
             err = f"navigator readout prephasing gradients of even echoes do not coincide"
-            logModule.error(err)
+            log_module.error(err)
             raise ValueError(err)
         # register trajectories
         # odd
@@ -199,22 +199,22 @@ class SeqJstmc(seq_baseclass.Sequence):
         t_ref_2_adc = self.block_acquisition.get_duration() / 2 + self.block_refocus.get_duration() / 2
 
         self.params.esp = 2 * np.max([t_exci_ref, t_ref_1_adc, t_ref_2_adc]) * 1e3
-        logModule.info(f"\t\t-found minimum ESP: {self.params.esp:.2f} ms")
+        log_module.info(f"\t\t-found minimum ESP: {self.params.esp:.2f} ms")
 
         if np.abs(t_ref_1_adc - t_ref_2_adc) > 1e-6:
-            logModule.error(f"refocus to adc timing different from adc to refocus. Systematic error in seq. creation")
+            log_module.error(f"refocus to adc timing different from adc to refocus. Systematic error in seq. creation")
         t_half_esp = self.params.esp * 1e-3 / 2
         # add delays
         if t_exci_ref < t_half_esp:
             self.delay_exci_ref1 = events.DELAY.make_delay(t_half_esp - t_exci_ref, system=self.pp_sys)
             if not self.delay_exci_ref1.check_on_block_raster():
                 err = f"exci ref delay not on block raster"
-                logModule.error(err)
+                log_module.error(err)
         if t_ref_1_adc < t_half_esp:
             self.delay_ref_adc = events.DELAY.make_delay(t_half_esp - t_ref_1_adc, system=self.pp_sys)
             if not self.delay_ref_adc.check_on_block_raster():
                 err = f"adc ref delay not on block raster"
-                logModule.error(err)
+                log_module.error(err)
         tes = np.arange(1, self.params.etl + 1) * self.params.esp
         self.te = tes.tolist()
 
@@ -231,29 +231,29 @@ class SeqJstmc(seq_baseclass.Sequence):
         ) + np.sum(
             [b.get_duration() for b in self.block_list_fid_nav_acq[:-1]]
         )
-        logModule.info(f"\t\t-total fid-nav time (2 navs + 1 delay of 10ms): {t_total_fid_nav * 1e3:.2f} ms")
+        log_module.info(f"\t\t-total fid-nav time (2 navs + 1 delay of 10ms): {t_total_fid_nav * 1e3:.2f} ms")
         # deminish TR by FIDnavs
         tr_eff = self.params.tr * 1e-3 - t_total_fid_nav
         max_num_slices = int(np.floor(tr_eff / t_total_etl))
-        logModule.info(f"\t\t-total echo train length: {t_total_etl * 1e3:.2f} ms")
-        logModule.info(f"\t\t-desired number of slices: {self.params.resolution_slice_num}")
-        logModule.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
+        log_module.info(f"\t\t-total echo train length: {t_total_etl * 1e3:.2f} ms")
+        log_module.info(f"\t\t-desired number of slices: {self.params.resolution_slice_num}")
+        log_module.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
         if self.params.resolution_slice_num > max_num_slices:
-            logModule.info(f"increase TR or Concatenation needed")
+            log_module.info(f"increase TR or Concatenation needed")
         # we want to add a delay additionally after fid nav block
         self.delay_slice = events.DELAY.make_delay(
             (tr_eff - self.params.resolution_slice_num * t_total_etl) / (self.params.resolution_slice_num + 1),
             system=self.pp_sys
         )
-        logModule.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
+        log_module.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
         if not self.delay_slice.check_on_block_raster():
             self.delay_slice.set_on_block_raster()
-            logModule.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
+            log_module.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
 
     def _build_variant(self):
-        logModule.info(f"build -- calculate minimum ESP")
+        log_module.info(f"build -- calculate minimum ESP")
         self._calculate_min_esp()
-        logModule.info(f"build -- calculate slice delay")
+        log_module.info(f"build -- calculate slice delay")
         self._calculate_slice_delay()
 
     def _loop_lines(self):
@@ -292,7 +292,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                 # write sampling pattern
                 scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                  slice_num=self.trueSliceNum[idx_slice],
-                                                                 pe_num=self.k_indexes[0, idx_n], echo_num=0,
+                                                                 pe_num=self.k_pe_indexes[0, idx_n], echo_num=0,
                                                                  acq_type=self.id_acq_se)
 
                 # delay if necessary
@@ -318,7 +318,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                     # write sampling pattern
                     scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                      slice_num=self.trueSliceNum[idx_slice],
-                                                                     pe_num=self.k_indexes[echo_idx, idx_n],
+                                                                     pe_num=self.k_pe_indexes[echo_idx, idx_n],
                                                                      echo_num=echo_idx, acq_type=self.id_acq_se)
 
                     # delay if necessary
@@ -368,7 +368,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                                                                          echo_type="gre-fid", nav_acq=True)
                         line_counter += 1
 
-        logModule.info(f"sequence built!")
+        log_module.info(f"sequence built!")
 
     def _set_fa(self, echo_idx: int):
         if echo_idx == 0:
@@ -382,15 +382,28 @@ class SeqJstmc(seq_baseclass.Sequence):
         sbb.rf.phase_rad = phase_rad
 
     def _set_phase_grad(self, echo_idx: int, phase_idx: int):
-        idx_phase = self.k_indexes[echo_idx, phase_idx]
+        # phase gradient placement maximum time was calculated for whole area, this is reflected in self.phase_enc_time
+        # however this includes ramps. Hence we need to calculate the amplitudes with the ramps in mind
+        area_factors = np.array([0.5, 1.0, 0.5])
+        # first get the phase index from the sampling scheme
+        idx_phase = self.k_pe_indexes[echo_idx, phase_idx]
+        # thens et the block we need to change dependent on the echo index
         if echo_idx == 0:
             sbb = self.block_refocus_1
         else:
             sbb = self.block_refocus
-            last_idx_phase = self.k_indexes[echo_idx - 1, phase_idx]
-            sbb.grad_phase.amplitude[1:3] = self.phase_areas[last_idx_phase] / self.phase_enc_time
+            # if we are further in the echo train we also need to rewind the previous phase encode.
+            # get the last phase encode index
+            last_idx_phase = self.k_pe_indexes[echo_idx - 1, phase_idx]
+            # get the effective phase encode time
+            t_pe = np.sum(np.diff(sbb.grad_phase.t_array_s[:4]) * area_factors)
+            sbb.grad_phase.amplitude[1:3] = self.phase_areas[last_idx_phase] / t_pe
+            
+        # set the phase encode into the gradient of the refocussing kernel while slice spoil takes place,
+        # default phase before read to -, after read to +
         if np.abs(self.phase_areas[idx_phase]) > 1:
-            sbb.grad_phase.amplitude[-3:-1] = - self.phase_areas[idx_phase] / self.phase_enc_time
+            t_pe = np.sum(np.diff(sbb.grad_phase.t_array_s[-4:]) * area_factors)
+            sbb.grad_phase.amplitude[-3:-1] = - self.phase_areas[idx_phase] / t_pe
         else:
             sbb.grad_phase.amplitude = np.zeros_like(sbb.grad_phase.amplitude)
 
@@ -409,7 +422,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         pe_end_amp = area / np.sum(factor * delta_end_times)
         if np.abs(pe_end_amp) > self.pp_sys.max_grad:
             err = f"amplitude violation upon last pe grad setting"
-            logModule.error(err)
+            log_module.error(err)
             raise AttributeError(err)
         self.block_spoil_end.grad_phase.amplitude[1:3] = - pe_end_amp
 
@@ -434,7 +447,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         else:
             err = f"sequence setup for only 2 navigators outside slice slab, " \
                   f"index {idx_nav} was given (should be 0 or 1)"
-            logModule.error(err)
+            log_module.error(err)
             raise ValueError(err)
         sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * z
         # we are setting the phase of a pulse here into its phase offset var.
