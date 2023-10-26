@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 import pypulseq as pp
 
 import numpy as np
-import rf_pulse_files as rfpf
+from pypulseq_interface import pypsi
 import logging
 import copy
 
-logModule = logging.getLogger(__name__)
+log_module = logging.getLogger(__name__)
 
 
 class Event:
@@ -56,11 +56,11 @@ class RF(Event):
         self.signal: np.ndarray = np.zeros(0, dtype=complex)
 
     @classmethod
-    def load_from_rfpf(cls, fname: str, flip_angle_rad: float, phase_rad: float, system: pp.Opts,
-                       duration_s: float = 2e-3, delay_s: float = 0.0, pulse_type: str = 'excitation'):
+    def load_from_pypsi_pulse(cls, fname: str, flip_angle_rad: float, phase_rad: float, system: pp.Opts,
+                              duration_s: float = 2e-3, delay_s: float = 0.0, pulse_type: str = 'excitation'):
         rf_instance = cls()
         rf_instance.system = system
-        rf = rfpf.RF.load(fname)
+        rf = pypsi.Params.pulse.load(fname)
         rf_instance.extRfFile = fname
         rf_instance.pulse_type = pulse_type
 
@@ -352,7 +352,7 @@ class GRAD(Event):
         def get_area_asym_grad(amp_h: float, time_h: float, time_htol: float, time_0toh: float = t_ramp_unipolar,
                                amp_l: float = amplitude) -> float:
             """
-            we want to calculate the area / moment from an assymetric gradient part
+            we want to calculate the area / moment from an asymmetric gradient part
             """
             area = 0.5 * time_0toh * amp_h + time_h * amp_h + 0.5 * (amp_h - amp_l) * time_htol + time_htol * amp_l
             return area
@@ -365,7 +365,13 @@ class GRAD(Event):
             calculate the amplitude of re/pre gradient given ramp times to 0 and to the slice select amplitude,
              respectively and a duration
             """
-            return (moment - asym_amplitude * t_asym_ramp / 2) / (duration - t_asym_ramp / 2 - t_zero_ramp / 2)
+            area = moment - asym_amplitude * t_asym_ramp / 2
+            time = duration - t_asym_ramp / 2 - t_zero_ramp / 2
+            if time < 1e-7:
+                calc_amp = 0.0
+            else:
+                calc_amp = area / time
+            return calc_amp
 
         def get_asym_grad_min_duration(max_amplitude: float, moment: float,
                                        t_asym_ramp: float = t_ramp_unipolar, t_zero_ramp: float = t_ramp_unipolar,
@@ -394,7 +400,7 @@ class GRAD(Event):
             areas.append(pre_moment)
             # we assume moment of slice select and pre phaser to act in same direction
             if np.sign(pre_moment) != np.sign(amplitude):
-                logModule.error(f"pre-phase / spoil pre -- slice select not optimized for opposite sign grads")
+                log_module.error(f"pre-phase / spoil pre -- slice select not optimized for opposite sign grads")
                 # we can adopt here also with doubling the ramp times in case we have opposite signs
             # want to minimize timing of gradient - use max grad
             pre_grad_amplitude = np.sign(pre_moment) * system.max_grad
@@ -422,7 +428,7 @@ class GRAD(Event):
         # re / spoil moment
         if np.abs(re_spoil_moment) > 1e-7:
             if np.sign(re_spoil_moment) != np.sign(amplitude):
-                logModule.error(f"pre-phase / spoil pre -- slice select not optimized for opposite sign grads")
+                log_module.error(f"pre-phase / spoil pre -- slice select not optimized for opposite sign grads")
                 # we can adopt here also with doubling the ramp times in case we have opposite signs
             t_ramp_asym = t_ramp_unipolar
             re_spoil_moment += - 0.5 * rephase * areas[-1]
@@ -437,7 +443,7 @@ class GRAD(Event):
                 duration_re_grad = grad_instance.set_on_raster(t_minimum_re_grad)
                 if t_ramp_unipolar > duration_re_grad:
                     err = "ramp times longer than available gradient time, slew rate limit"
-                    logModule.error(err)
+                    log_module.error(err)
                     raise ValueError(err)
                 # we want to fit the pre moment into the given duration
                 # i.e. ramp 0 to pre_amplitude, flat time, ramp pre_amplitude to amplitude
@@ -466,15 +472,38 @@ class GRAD(Event):
                     # can happen with small moments, since above calculations not take into account 0 flat time
                     # we need to recalculate the gradient needed for only the ramps.
                     re_grad_amplitude = amplitude
+                    # sanity check if we can fit at all
                     ramp_time = grad_instance.set_on_raster(np.abs(re_spoil_moment * 2 / re_grad_amplitude))
                     min_ramp_time = grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
                     if min_ramp_time > ramp_time:
-                        warn = f"rephasing area low, need only a ramp." \
+                        warn = f"rephasing area low, need only a ramp. " \
                                f"ramp slew rate too high, revert to maximal possible" \
                                f"-> can lead to slight deviations in ramp area! change spoiling gradient to avoid!"
-                        logModule.warning(warn)
-                        ramp_time = min_ramp_time
-                    duration_re_grad = ramp_time
+                        log_module.warning(warn)
+                        duration_re_grad = min_ramp_time
+                    else:
+                        # we have ramp time higher than minimal ramp time. need to distribute the area
+                        # to a ramp fitting raster timing. usually this creates a mismatch
+                        # so we try to stitch the ramp from two parts
+                        # we take a ramp time slightly higher than the one we need (10% bigger)
+                        ramp_time = grad_instance.set_on_raster(np.abs(1.1 * re_spoil_moment * 2 / re_grad_amplitude))
+                        # divide it into 2 subsections
+                        t1 = grad_instance.set_on_raster(np.abs(0.5 * ramp_time))
+                        t2 = ramp_time - t1
+                        # calculate the amplitude of the middle point to accommodate the area
+                        mid_amp = (areas[-1] / t1 - amplitude / 2) / (0.5 + 0.5 * t2 / t1)
+                        # set first part of ramp
+                        amps.extend([mid_amp])
+                        times.extend([t + t1])
+                        # second part is set by ramp down
+                        duration_re_grad = t1 + t2
+                        # sanity check. build area only with ramp, check if we match wanted area
+                        ramp_area = np.trapz(x=[0, t1, t1+t2], y=[amplitude, mid_amp, 0])
+                        if np.abs(ramp_area - areas[-1]) > 1e-9:
+                            warn = (f"ramp area ({ramp_area:.2f}) not accommodating needed rephasing area ({areas[-1]:.2f})."
+                                    f" This can be due to ramp time set on raster time. "
+                                    f"Could be avoided with higher spoiling gradient. ")
+                            log_module.warning(warn)
             t += duration_re_grad
         else:
             t += grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
@@ -512,12 +541,12 @@ class GRAD(Event):
         # last sanity check max grad / slew times
         if np.max(np.abs(amps)) > system.max_grad:
             err = f"amplitude violation, maximum gradient exceeded"
-            logModule.error(err)
+            log_module.error(err)
             raise ValueError(err)
         grad_slew = np.abs(np.diff(amps) / np.diff(times))
         if np.max(grad_slew) > system.max_slew:
             err = f"slew rate violation, maximum slew rate exceeded"
-            logModule.error(err)
+            log_module.error(err)
             raise ValueError(err)
 
         return grad_instance, delay, duration_re_grad
@@ -580,12 +609,12 @@ class GRAD(Event):
         # last sanity check max grad / slew times
         if np.max(np.abs(amps)) > system.max_grad:
             err = f"amplitude violation, maximum gradient exceeded"
-            logModule.error(err)
+            log_module.error(err)
             raise ValueError(err)
         grad_slew = np.abs(np.diff(amps) / np.diff(times))
         if np.max(grad_slew) > system.max_slew:
             err = f"slew rate violation, maximum slew rate exceeded"
-            logModule.error(err)
+            log_module.error(err)
             raise ValueError(err)
         return grad_instance
 
@@ -757,7 +786,7 @@ if __name__ == '__main__':
         system=pp.Opts()
     )
     rf_new_ns = rf_new.to_simple_ns()
-    logModule.info("compare rf")
+    log_module.info("compare rf")
 
     grad_ns = pp.make_extended_trapezoid(
         'z',
@@ -766,15 +795,15 @@ if __name__ == '__main__':
     )
     grad_new = GRAD.make_trapezoid('z', system=pp.Opts(), area=1 / 0.7 * 1e3, duration_s=2e-3)
     grad_new_ns = grad_new.to_simple_ns()
-    logModule.info("compare grad")
+    log_module.info("compare grad")
 
     adc_ns = pp.make_adc(num_samples=304, duration=3e-3)
     adc_new = ADC.make_adc(system=pp.Opts(), num_samples=304, duration_s=3e-3)
     adc_new_ns = adc_new.to_simple_ns()
 
-    logModule.info("compare adc")
+    log_module.info("compare adc")
 
     delay_ns = pp.make_delay(1e-3)
     delay_new = DELAY.make_delay(1e-3)
 
-    logModule.info("compare delays")
+    log_module.info("compare delays")

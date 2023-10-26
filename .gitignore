@@ -3,3 +3,4 @@
 *.pyc
 /test/
 /jstmc/test/
+/wandb/

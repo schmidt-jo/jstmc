@@ -1,6 +1,6 @@
 import numpy as np
 from pypulseq.SAR import SAR_calc
-from jstmc import options
+import pypulseq as pp
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import logging
@@ -16,14 +16,14 @@ def set_mpl():
     return colors
 
 
-def calc_sar(seq: typing.Union[options.Sequence, Path, str], visualize: bool = True):
+def calc_sar(seq: typing.Union[pp.Sequence, Path, str], visualize: bool = True):
     if isinstance(seq, (str, Path)):
         seq_pass = seq
         path = Path(seq_pass).absolute()
         path = path.with_stem(f"{path.stem}_sar_estimate")
         save_file = path.with_suffix(".png").__str__()
-    elif isinstance(seq, options.Sequence):
-        seq_pass = seq.ppSeq
+    elif isinstance(seq, pp.Sequence):
+        seq_pass = seq
         path = Path(seq.config.outputPath).absolute()
         path.mkdir(parents=True, exist_ok=True)
         save_file = path.joinpath(f"jstmc{seq.config.version}_sar_estimate.png").__str__()

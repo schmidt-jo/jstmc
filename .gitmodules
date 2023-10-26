@@ -1,6 +1,6 @@
-[submodule "rf_pulse_files"]
-	path = rf_pulse_files
-	url = git@github.com:schmidtijoe/rf_pulse_files.git
 [submodule "pypulseq"]
 	path = pypulseq
 	url = https://github.com/schmidtijoe/pypulseq
+[submodule "pypulseq_interface"]
+	path = pypulseq_interface
+	url = git@github.com:schmidtijoe/pypulseq_interface.git

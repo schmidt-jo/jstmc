@@ -12,7 +12,7 @@ import tqdm
 logModule = logging.getLogger(__name__)
 
 
-def pretty_plot_et(seq: options.Sequence,
+def pretty_plot_et(seq: options.Config,
                    save: typing.Union[str, Path] = "",
                    plot_blips: bool = False,
                    t_start: int = 0,
@@ -22,7 +22,7 @@ def pretty_plot_et(seq: options.Sequence,
     logging.info(f"plot")
 
     # set time until which to plot (taking 1echo time more for nice plot)
-    t_total = (seq.params.ETL + 2) * seq.params.ESP * 1000  # in us
+    t_total = (seq.interface.etl + 2) * seq.interface.esp * 1000  # in us
     # build x ax
     x_arr = np.arange(0, int(t_total))
     # init arrays
@@ -54,11 +54,11 @@ def pretty_plot_et(seq: options.Sequence,
     # find starting idx
     start_idx = 0
     t_cum = 0
-    for block_idx in range(len(seq.ppSeq.block_durations)):
-        t_cum += 1e6 * seq.ppSeq.block_durations[block_idx]
+    for block_idx in range(len(seq.pp_seq.block_durations)):
+        t_cum += 1e6 * seq.pp_seq.block_durations[block_idx]
         if t_cum > t_start:
             start_idx = block_idx
-            block = seq.ppSeq.get_block(block_idx + 1)
+            block = seq.pp_seq.get_block(block_idx + 1)
             # check if we found excitation pulse, ie. start of echo train
             if getattr(block, "rf") is not None:
                 if block.rf.use == "excitation":
@@ -66,10 +66,10 @@ def pretty_plot_et(seq: options.Sequence,
                     break
     t_start = t_cum
     t_cum = 0
-    for block_idx in np.arange(start_idx, len(seq.ppSeq.block_durations)):
+    for block_idx in np.arange(start_idx, len(seq.pp_seq.block_durations)):
         t0 = t_cum
-        block = seq.ppSeq.get_block(block_idx + 1)
-        if t_cum + 1e6 * seq.ppSeq.block_durations[block_idx] > t_total:
+        block = seq.pp_seq.get_block(block_idx + 1)
+        if t_cum + 1e6 * seq.pp_seq.block_durations[block_idx] > t_total:
             break
 
         if getattr(block, 'rf') is not None:
@@ -192,19 +192,19 @@ def pretty_plot_et(seq: options.Sequence,
     plt.show()
 
 
-def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
-    n_read = seq_vars.params.resolutionNRead
-    n_phase = seq_vars.params.resolutionNPhase
-    x_ax = np.tile(np.arange(n_read), seq_vars.params.ETL)
+def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Config):
+    n_read = seq_vars.interface.resolution_n_read
+    n_phase = seq_vars.interface.resolution_n_phase
+    x_ax = np.tile(np.arange(n_read), seq_vars.interface.etl)
     y_ax = np.arange(n_phase) - int(n_phase / 2)
-    plot_arr = np.zeros((seq_vars.params.resolutionNPhase, n_read * seq_vars.params.ETL))
+    plot_arr = np.zeros((seq_vars.interface.resolution_n_phase, n_read * seq_vars.interface.etl))
     for s_indices in tqdm.tqdm(sampling_pattern, desc="processing sampling scheme"):
         pe_num = s_indices['pe_num']
         echo_num = s_indices['echo_num']
         plot_arr[pe_num, echo_num*n_read:(echo_num+1)*n_read] = 1
 
-    x_labels = np.arange(1, seq_vars.params.ETL + 1)
-    x_pos = np.array([n_read/2 + k*n_read for k in range(seq_vars.params.ETL)])
+    x_labels = np.arange(1, seq_vars.interface.etl + 1)
+    x_pos = np.array([n_read / 2 + k * n_read for k in range(seq_vars.interface.etl)])
     y_labels = [0]
     y_pos = [int(n_phase/2)]
 
@@ -216,7 +216,7 @@ def plot_sampling_pattern(sampling_pattern: list, seq_vars: options.Sequence):
     ax.set_ylabel("# phase encode")
     ax.set_xticks(x_pos, labels=x_labels)
     ax.set_yticks(y_pos, labels=y_labels)
-    ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.params.ETL)
+    ax.imshow(plot_arr, interpolation='None', aspect=seq_vars.interface.etl)
     plt.show()
 
 
@@ -244,8 +244,8 @@ if __name__ == '__main__':
     seq_path = Path(
         "D:\\Daten\\01_Work\\11_owncloud\\ds_mese_cbs_js\\97_pulseq\\sequence\\seq_1a_fa180_fov_210-166-10_RL\\jstmc1a_fa180_fov210-165-14_RL.seq"
     ).absolute()
-    seq = options.Sequence.load(seq_path)
-    scan_time = np.sum(seq.ppSeq.block_durations)
+    seq = options.RXV_Sequence.load(seq_path)
+    scan_time = np.sum(seq.pp_seq.block_durations)
     pretty_plot_et(seq, plot_blips=True, t_start=0, figsize=(10, 5))
 
 
