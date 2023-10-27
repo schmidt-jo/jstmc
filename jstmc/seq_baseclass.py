@@ -23,7 +23,6 @@ class Sequence(abc.ABC):
         # track echoes
         self.te: list = []
 
-        # phase grads
         self.phase_areas: np.ndarray = (- np.arange(
             self.params.resolution_n_phase
         ) + self.params.resolution_n_phase / 2) * self.params.delta_k_phase
@@ -42,6 +41,8 @@ class Sequence(abc.ABC):
         # set exciation and refocusing at least to be present
         self.block_excitation: kernels.Kernel = NotImplemented
         self.block_refocus: kernels.Kernel = NotImplemented
+        # register all pulses that need slice select
+        self.kernel_pulses_slice_select: list = []
 
         self._sampling_pattern_constr: list = []
         self.block_excitation: kernels.Kernel = kernels.Kernel()
@@ -219,8 +220,8 @@ class Sequence(abc.ABC):
         self._loop_lines()
         log_module.info(f"set pypsi interface")
         # sampling + k traj
-        self._write_sampling_pattern()
         self._set_k_trajectories()  # raises error if not implemented
+        self._write_sampling_pattern()
         # recon
         self._set_recon_parameters_img()
         self._set_nav_parameters()  # raises error if not implemented
@@ -424,6 +425,15 @@ class Sequence(abc.ABC):
             self.k_pe_indexes[:, :] = np.arange(
                 self.params.number_central_lines + self.params.number_outer_lines
             )
+
+    def _apply_slice_offset(self, idx_slice: int):
+        # set phase and freq offset for all slice select pulse gradient kernels
+        for sbb in self.kernel_pulses_slice_select:
+            grad_slice_amplitude_hz = sbb.grad_slice.amplitude[sbb.grad_slice.t_array_s >= sbb.rf.t_delay_s][0]
+            sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * self.z[idx_slice]
+            # we are setting the phase of a pulse here into its phase offset var.
+            # To merge both: given phase parameter and any complex signal array data
+            sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
 
     def _set_grad_for_emc(self, grad):
         return 1e3 / self.interface.specs.gamma * grad

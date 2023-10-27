@@ -8,10 +8,11 @@ log_module = logging.getLogger(__name__)
 @dc.dataclass
 class Config:
     # Input sequence configuration
-    i: str = sp.field(default="", help="Input Sequence Configuration")
+    i: str = sp.field(default="", alias="-c", help="Input Sequence Configuration")
     s: str = sp.field(default="./default_config/system_specifications_7T_mpi_cbs.json",
                       help="Input System Specifications")
-    o: str = sp.field(default="", help="Output Path for .seq file and pypsi interface")
+    o: str = sp.field(default="", help="Output Path for .seq file and pypsi interface,"
+                                       "reverts to input location if blank")
     v: bool = sp.field(default=True, help="Visualize on/off")
     r: bool = sp.field(default=False, help="Report on/off")
     vv: str = sp.field(default="xx", help="Version")

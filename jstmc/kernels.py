@@ -73,35 +73,58 @@ class Kernel:
         # From Pulseq: According to the information from Klaus Scheffler and indirectly from Siemens this
         # is the present convention - the samples are shifted by 0.5 dwell
         t_start = self.adc.t_delay_s + self.adc.t_dwell_s / 2
-        # set adc sampling point times
-        t_adc_sampling = np.arange(self.adc.num_samples) * self.adc.t_dwell_s
-        # interpolate grad amp values for adc positions
-        grad_amp_for_t_adc = np.interp(t_start + t_adc_sampling, self.grad_read.t_array_s, self.grad_read.amplitude)
-        # interpolate ramp / pre grad
-        # pick timings
-        t_pre = self.grad_read.t_array_s[self.grad_read.t_array_s <= t_start].tolist()
-        grad_amps_pre = self.grad_read.amplitude[self.grad_read.t_array_s <= t_start].tolist()
-        if t_start - t_pre[-1] > 1e-8:
-            # interpolate start amp
-            grad_amps_pre.append(np.interp(
-                t_start, [t_pre[-1], self.grad_read.t_array_s[self.grad_read.t_array_s > t_start][0]],
-                [grad_amps_pre[-1], self.grad_read.amplitude[self.grad_read.t_array_s > t_start][0]]
-            ))
-            # add start time
-            t_pre.append(t_start)
-        # calculate k-position before start of adc
-        area_pre = pre_read_area + np.trapz(grad_amps_pre, t_pre)
-        # first adc position is at t_start, then we sample each dwell time in between the grad might change
-        # hence we want to calculate the area between each step
+        # # set adc sampling point times
+        # t_adc_sampling = np.arange(self.adc.num_samples) * self.adc.t_dwell_s
+        # # interpolate grad amp values for adc positions
+        # grad_amp_for_t_adc = np.interp(t_start + t_adc_sampling, self.grad_read.t_array_s, self.grad_read.amplitude)
+        # # interpolate ramp / pre grad
+        # # pick timings
+        # t_pre = self.grad_read.t_array_s[self.grad_read.t_array_s <= t_start].tolist()
+        # grad_amps_pre = self.grad_read.amplitude[self.grad_read.t_array_s <= t_start].tolist()
+        # if t_start - t_pre[-1] > 1e-8:
+        #     # interpolate start amp
+        #     grad_amps_pre.append(np.interp(
+        #         t_start, [t_pre[-1], self.grad_read.t_array_s[self.grad_read.t_array_s > t_start][0]],
+        #         [grad_amps_pre[-1], self.grad_read.amplitude[self.grad_read.t_array_s > t_start][0]]
+        #     ))
+        #     # add start time
+        #     t_pre.append(t_start)
+        # # calculate k-position before start of adc
+        # area_pre = pre_read_area + np.trapz(grad_amps_pre, t_pre)
+        # # first adc position is at t_start, then we sample each dwell time in between the grad might change
+        # # hence we want to calculate the area between each step
+        #
+        # grad_areas_for_t_adc = np.zeros_like(grad_amp_for_t_adc)
+        # for amp_idx in np.arange(1, grad_areas_for_t_adc.shape[0]):
+        #     grad_areas_for_t_adc[amp_idx] = grad_areas_for_t_adc[amp_idx - 1] + np.trapz(
+        #         grad_amp_for_t_adc[amp_idx - 1:amp_idx + 1], dx=self.adc.t_dwell_s
+        #     )
 
-        grad_areas_for_t_adc = np.zeros_like(grad_amp_for_t_adc)
+        # set up times = want to include the gradient before adc start
+        t_adc_sampling = np.concatenate(
+            (
+                self.grad_read.t_array_s[self.grad_read.t_array_s <= t_start],
+                t_start + np.arange(self.adc.num_samples) * self.adc.t_dwell_s
+            ),
+            axis=0
+        )
+        grad_amp_adc_sampling = np.interp(
+            x=t_adc_sampling, xp=self.grad_read.t_array_s, fp=self.grad_read.amplitude
+        )
+        # set array to hold grad areas cumulatively per sample
+        grad_areas_for_t_adc = np.zeros(self.adc.num_samples)
+
+        # calculate gradient area til first sample, including prephasing area
+        grad_areas_for_t_adc[0] = pre_read_area + np.trapz(
+            x=t_adc_sampling[t_adc_sampling <= t_start],
+            y=grad_amp_adc_sampling[t_adc_sampling <= t_start]
+        )
         for amp_idx in np.arange(1, grad_areas_for_t_adc.shape[0]):
             grad_areas_for_t_adc[amp_idx] = grad_areas_for_t_adc[amp_idx - 1] + np.trapz(
-                grad_amp_for_t_adc[amp_idx - 1:amp_idx + 1], dx=self.adc.t_dwell_s
+                grad_amp_adc_sampling[t_adc_sampling > t_start][amp_idx - 1:amp_idx + 1], dx=self.adc.t_dwell_s
             )
-
         # calculate k-positions
-        k_pos = (area_pre + grad_areas_for_t_adc) / fs_grad_area
+        k_pos = grad_areas_for_t_adc / fs_grad_area
         return k_pos
 
     @classmethod
@@ -160,20 +183,19 @@ class Kernel:
     def refocus_slice_sel_spoil(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts,
                                 pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
         # calculate read gradient in order to use correct area (corrected for ramps
-        acquisition_window = set_on_grad_raster_time(system=system, time=pyp_interface.acquisition_time)
         grad_read = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir, system=system,
-            flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read, flat_time=acquisition_window
+            flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read,
+            flat_time=pyp_interface.acquisition_time
         )
         # block is first refocusing + spoiling + phase encode
         log_module.info(f"setup refocus {pulse_num + 1}")
         # set up longest phase encode
-        phase_grad_areas = (- np.arange(pyp_interface.resolution_n_phase) + pyp_interface.resolution_n_phase / 2) * \
-                           pyp_interface.delta_k_phase
+        max_phase_grad_area = pyp_interface.resolution_n_phase / 2 * pyp_interface.delta_k_phase
         # build longest phase gradient
         grad_phase = events.GRAD.make_trapezoid(
             channel=pyp_interface.phase_dir,
-            area=np.max(phase_grad_areas),
+            area=max_phase_grad_area,
             system=system
         )
         duration_phase_grad = set_on_grad_raster_time(
@@ -236,7 +258,7 @@ class Kernel:
             # duration between - rather take middle part of slice select, rf duration on different raster possible
             t_duration_between = grad_slice.set_on_raster(grad_slice.slice_select_duration)
             grad_phase = events.GRAD.sym_grad(
-                system=system, channel=pyp_interface.phase_dir, area_lobe=np.max(phase_grad_areas),
+                system=system, channel=pyp_interface.phase_dir, area_lobe=max_phase_grad_area,
                 duration_lobe=duration_phase_grad, duration_between=t_duration_between, reverse_second_lobe=True
             )
             grad_read_prewind = events.GRAD.sym_grad(
@@ -253,7 +275,7 @@ class Kernel:
             )
             grad_phase = events.GRAD.make_trapezoid(
                 channel=pyp_interface.phase_dir,
-                area=np.max(phase_grad_areas),
+                area=max_phase_grad_area,
                 system=system,
                 duration_s=duration_phase_grad
             )
@@ -277,21 +299,27 @@ class Kernel:
     def acquisition_fs(cls, pyp_params: pypsi.Params.pypulseq, system: pp.Opts):
         # block : adc + read grad
         log_module.info("setup acquisition")
-        acquisition_window = set_on_grad_raster_time(
-            system=system, time=pyp_params.acquisition_time + system.adc_dead_time
-        )
-        grad_read = events.GRAD.make_trapezoid(
-            channel=pyp_params.read_dir,
-            flat_area=pyp_params.delta_k_read * pyp_params.resolution_n_read,
-            flat_time=acquisition_window,  # given in [s] via options
-            system=system
-        )
         adc = events.ADC.make_adc(
             num_samples=int(pyp_params.resolution_n_read * pyp_params.oversampling),
             dwell=pyp_params.dwell,
             system=system
         )
+        grad_read = events.GRAD.make_trapezoid(
+            channel=pyp_params.read_dir,
+            flat_area=pyp_params.delta_k_read * pyp_params.resolution_n_read,
+            flat_time=adc.t_duration_s,
+            system=system
+        )
         delay = (grad_read.get_duration() - adc.t_duration_s) / 2
+        # want to set adc symmetrically into grad read, and we want the middle adc sample to hit k space center.
+        # From Pulseq: According to the information from Klaus Scheffler and indirectly from Siemens this
+        # is the present convention - the samples are shifted by 0.5 dwell
+        if (adc.t_dwell_s / 2 / system.adc_raster_time) % 1.0 > 1e-9:
+            warn = (f"cant account for dwell time / 2 sample shift in adc, within the adc delay. "
+                    f"Dwell / 2 is not on adc raster time.")
+            log_module.warning(warn)
+        else:
+            delay -= adc.t_dwell_s / 2
         if delay < 0:
             err = f"adc longer than read gradient"
             log_module.error(err)
@@ -302,7 +330,22 @@ class Kernel:
         else:
             warn = "cant set adc delay to match read gradient bc its smaller than adc dead time."
             log_module.warning(warn)
-        # want to set adc symmetrically into grad read
+        if delay < grad_read.t_array_s[1]:
+            t_diff = grad_read.t_array_s[1] - delay
+            t_diff = t_diff / system.adc_raster_time
+            # adc would start sampling already within the ramp.
+            warn = (f"adc delay shorter than ramp time by {t_diff:.2f} adc_raster_units. "
+                    f"adc dwell / 2 is {adc.t_dwell_s / 2 / system.adc_raster_time:.2f} adc_raster_units.\n"
+                    f"This might be deliberate to control the first sample "
+                    f"(especially if times are int units of adc raster). "
+                    f"But also might lead to unwanted read distortions, especially if half dwell time is less.")
+            log_module.warning(warn)
+        # sanity check
+        if delay % system.adc_raster_time > 1e-9:
+            # adc delay not fitting on adc raster
+            warn = "adc delay set not multiple of adc raster. might lead to small timing deviations in actual .seq file"
+            log_module.warning(warn)
+
         adc.t_delay_s = delay
         # finished block
         return cls(adc=adc, grad_read=grad_read)
@@ -381,7 +424,7 @@ class Kernel:
         area_pre_read = (1 - 0.5 / pf_factor) * grad_read_fs.flat_area + area_ramp
 
         adc_duration = int(num_acq_pts * pyp_interface.oversampling) * pyp_interface.dwell
-        adc_delay = (acq_time_fs - adc_duration) / 2    # distribute duration difference from raster time differences
+        adc_delay = (acq_time_fs - adc_duration) / 2  # distribute duration difference from raster time differences
         # add ramp
         adc_delay += grad_read_fs.t_array_s[1]
         if adc_delay < system.adc_dead_time:
@@ -556,10 +599,9 @@ class Kernel:
     def spoil_all_grads(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts):
         grad_read = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir, system=system,
-            flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read, flat_time=pyp_interface.acquisition_time
+            flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read,
+            flat_time=pyp_interface.acquisition_time
         )
-        phase_grad_areas = (- np.arange(pyp_interface.resolution_n_phase) + pyp_interface.resolution_n_phase / 2) * \
-                           pyp_interface.delta_k_phase
         grad_read_spoil = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir,
             area=-pyp_interface.read_grad_spoiling_factor * grad_read.area,
@@ -567,7 +609,7 @@ class Kernel:
         )
         grad_phase = events.GRAD.make_trapezoid(
             channel=pyp_interface.phase_dir,
-            area=np.max(phase_grad_areas),
+            area=pyp_interface.resolution_n_phase / 2 * pyp_interface.delta_k_phase,
             system=system
         )
         grad_slice = events.GRAD.make_trapezoid(
@@ -587,7 +629,7 @@ class Kernel:
         )
         grad_phase = events.GRAD.make_trapezoid(
             channel=pyp_interface.phase_dir,
-            area=np.max(phase_grad_areas),
+            area=pyp_interface.resolution_n_phase / 2 * pyp_interface.delta_k_phase,
             system=system,
             duration_s=duration
         )

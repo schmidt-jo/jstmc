@@ -75,10 +75,10 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             raise ValueError(err)
 
         # for the first we need a different gradient rewind to rephase the partial fourier readout k-space travel
-        self.block_refocus_first: Kernel = Kernel.copy(self.block_refocus)
+        self.block_refocus_1: Kernel = Kernel.copy(self.block_refocus)
         self._mod_first_refocus_rewind_0_echo(grad_pre_area=grad_pre_area)
         # need to adapt echo read prewinder and rewinder
-        self._mod_block_prewind_echo_read(self.block_refocus_first)
+        self._mod_block_prewind_echo_read(self.block_refocus_1)
 
         self._mod_block_rewind_echo_read(self.block_refocus)
         self._mod_block_prewind_echo_read(self.block_refocus)
@@ -86,11 +86,14 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # plot files for visualization
         if self.params.visualize:
             self.block_excitation.plot(path=self.interface.config.output_path, name="excitation")
-            self.block_refocus_first.plot(path=self.interface.config.output_path, name="refocus-first")
+            self.block_refocus_1.plot(path=self.interface.config.output_path, name="refocus-1")
             self.block_refocus.plot(path=self.interface.config.output_path, name="refocus")
             self.block_pf_acquisition.plot(path=self.interface.config.output_path, name="partial-fourier-acqusisition")
             self.block_se_acq.plot(path=self.interface.config.output_path, name="se-acquisition")
             self.block_gre_acq.plot(path=self.interface.config.output_path, name="gre-acquisition")
+
+        # register all slice select kernel pulse gradients
+        self.kernel_pulses_slice_select = [self.block_excitation, self.block_refocus_1, self.block_refocus]
 
         # ToDo:
         # as is now all gesse readouts sample the same phase encode lines as the spin echoes.
@@ -183,7 +186,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # substract prewound area (dependent on partial fourier factor)
         area_to_rewind = area_0_read_grad - grad_pre_area
         # get times of the gradient to adopt - read gradient, and calculate deltas
-        delta_times_first_grad_part = np.diff(self.block_refocus_first.grad_read.t_array_s[:4])
+        delta_times_first_grad_part = np.diff(self.block_refocus_1.grad_read.t_array_s[:4])
         # amplitude at trapezoid points is middle rectangle plus 2 ramp triangles
         amplitude = - area_to_rewind / np.sum(np.array([0.5, 1.0, 0.5]) * delta_times_first_grad_part)
         # check max grad violation
@@ -192,10 +195,10 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             log_module.error(err)
             raise ValueError(err)
         # assign
-        self.block_refocus_first.grad_read.amplitude[1:3] = amplitude
-        self.block_refocus_first.grad_read.area[0] = np.trapz(
-            x=self.block_refocus_first.grad_read.t_array_s[:4],
-            y=self.block_refocus_first.grad_read.amplitude[:4]
+        self.block_refocus_1.grad_read.amplitude[1:3] = amplitude
+        self.block_refocus_1.grad_read.area[0] = np.trapz(
+            x=self.block_refocus_1.grad_read.t_array_s[:4],
+            y=self.block_refocus_1.grad_read.amplitude[:4]
         )
 
     def _mod_block_prewind_echo_read(self, sbb: Kernel):
@@ -265,10 +268,10 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         t_exci_0e = self.block_excitation.get_duration() - t_start + self.block_pf_acquisition.t_mid
         # find time between mid 0th echo and mid first refocus
         t_0e_1ref = self.block_pf_acquisition.get_duration() - self.block_pf_acquisition.t_mid + \
-                    self.block_refocus_first.get_duration() / 2
+                    self.block_refocus_1.get_duration() / 2
 
         # find time between mid refocus and first gre and first se
-        t_ref1_gre1 = self.block_refocus_first.get_duration() / 2 + self.block_gre_acq.get_duration() / 2
+        t_ref1_gre1 = self.block_refocus_1.get_duration() / 2 + self.block_gre_acq.get_duration() / 2
         t_gre1_se1 = self.block_gre_acq.get_duration() / 2 + self.block_se_acq.get_duration() / 2
 
         # echo time of first se is twice the bigger time of 1) between excitation and first ref
@@ -315,7 +318,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # want to choose the rf based on position in echo train
         if rf_idx == 0:
             # first refocusing is different kernel
-            block = self.block_refocus_first
+            block = self.block_refocus_1
         else:
             # we are on usual gesse echoes, past the first refocus
             block = self.block_refocus
@@ -353,14 +356,6 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         else:
             block.grad_phase.amplitude = np.zeros_like(block.grad_phase.amplitude)
 
-    def _apply_slice_offset(self, idx_slice: int):
-        for sbb in [self.block_excitation, self.block_refocus_first, self.block_refocus]:
-            grad_slice_amplitude_hz = sbb.grad_slice.amplitude[sbb.grad_slice.t_array_s >= sbb.rf.t_delay_s][0]
-            sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * self.z[idx_slice]
-            # we are setting the phase of a pulse here into its phase offset var.
-            # To merge both: given phase parameter and any complex signal array data
-            sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
-
     def _add_gesse_readouts(self, idx_pe_loop: int, idx_slice_loop: int,
                             scan_idx: int, echo_se_idx: int, echo_gre_idx: int):
         # phase encodes are set equal for all 3 readouts and follow the central se echo idx
@@ -370,8 +365,8 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                     slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                    pe_num=self.k_pe_indexes[
-                                                                        phase_encode_echo, idx_pe_loop],
+                                                                    pe_num=int(self.k_pe_indexes[
+                                                                        phase_encode_echo, idx_pe_loop]),
                                                                     echo_num=echo_gre_idx + echo_se_idx,
                                                                     acq_type=self.id_gre_acq, echo_type="gre",
                                                                     echo_type_num=echo_gre_idx)
@@ -381,8 +376,8 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # write sampling pattern
         scan_idx, echo_se_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                    slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                   pe_num=self.k_pe_indexes[
-                                                                       phase_encode_echo, idx_pe_loop],
+                                                                   pe_num=int(self.k_pe_indexes[
+                                                                       phase_encode_echo, idx_pe_loop]),
                                                                    echo_num=echo_gre_idx + echo_se_idx,
                                                                    acq_type=self.id_se_acq, echo_type="se",
                                                                    echo_type_num=echo_se_idx)
@@ -392,8 +387,8 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # write sampling pattern
         scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                     slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                    pe_num=self.k_pe_indexes[
-                                                                        phase_encode_echo, idx_pe_loop],
+                                                                    pe_num=int(self.k_pe_indexes[
+                                                                        phase_encode_echo, idx_pe_loop]),
                                                                     echo_num=echo_gre_idx + echo_se_idx,
                                                                     acq_type=self.id_gre_acq, echo_type="gre",
                                                                     echo_type_num=echo_gre_idx)
@@ -423,7 +418,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                 # write sampling pattern
                 scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                             slice_num=self.trueSliceNum[idx_slice],
-                                                                            pe_num=self.k_pe_indexes[0, idx_n],
+                                                                            pe_num=int(self.k_pe_indexes[0, idx_n]),
                                                                             echo_num=echo_gre_idx + echo_se_idx,
                                                                             acq_type=self.id_pf_acq, echo_type="gre",
                                                                             echo_type_num=echo_gre_idx)
@@ -437,7 +432,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                 # looping through slices per phase encode, set phase encode for ref 1
                 self._set_phase_grad(phase_idx=idx_n, echo_idx=0)
                 # add block
-                self.pp_seq.add_block(*self.block_refocus_first.list_events_to_ns())
+                self.pp_seq.add_block(*self.block_refocus_1.list_events_to_ns())
 
                 # delay if necessary
                 if self.t_delay_ref1_se1.get_duration() > 1e-7:

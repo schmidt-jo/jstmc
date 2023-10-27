@@ -275,7 +275,20 @@ class GRAD(Event):
         grad_instance.system = system
         # some timing checks
         if flat_time > 1e-7:
+            flat_time_set = flat_time
             flat_time = grad_instance.set_on_raster(flat_time, double=False)
+            if np.abs(flat_time_set - flat_time) > 1e-9:
+                # if the amplitude is given, the gradient moment across the original set flat time remains equal, if
+                # the flat time needs to be adjusted / prolonged due to raster. the flat area increases though.
+                # if the flat area is given, the amplitude is calculated via: flat_area / flat_time, if the time increased
+                # due to rastering, we get a smaller amplitude, leading to an altered area across the
+                # originally set flat time.
+                # this might lead to deviations in readout scenarios. where the flat time and area
+                # might stem from adc timings. or would lead to minute slice select thickness changes.
+                # if we want to keep this flat area across the set unrastered flat time equal
+                # and just append additional area, we need to increase the area by the same relative amount
+                if np.abs(flat_area) > 1e-9:
+                    flat_area *= flat_time / flat_time_set
         if duration_s > 1e-7:
             duration_s = grad_instance.set_on_raster(duration_s, double=False)
         if rise_time > 1e-7:
@@ -306,9 +319,9 @@ class GRAD(Event):
             grad_simple_ns.rise_time + grad_simple_ns.flat_time + grad_simple_ns.fall_time
         ])
         grad_instance.t_delay_s = delay_s
-        grad_instance.t_fall_time_s = rise_time
-        grad_instance.t_rise_time_s = rise_time
-        grad_instance.t_flat_time_s = flat_time
+        grad_instance.t_fall_time_s = grad_simple_ns.rise_time
+        grad_instance.t_rise_time_s = grad_simple_ns.rise_time
+        grad_instance.t_flat_time_s = grad_simple_ns.flat_time
 
         grad_instance.system = system
 

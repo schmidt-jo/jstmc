@@ -7,14 +7,6 @@ logging.getLogger('simple_parsing').setLevel(logging.WARNING)
 
 
 def main():
-    # set up logging
-    logging.basicConfig(format='%(asctime)s %(levelname)s :: %(name)s -- %(message)s',
-                        datefmt='%I:%M:%S', level=logging.INFO)
-
-    logging.info("__________________________________________________________")
-    logging.info("____________ jstmc pypulseq sequence creation ____________")
-    logging.info("__________________________________________________________")
-
     prog_args = options.create_cli()
 
     logging.info("Starting sequence build")
@@ -67,4 +59,14 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # set up logging
+    logging.basicConfig(format='%(asctime)s %(levelname)s :: %(name)s -- %(message)s',
+                        datefmt='%I:%M:%S', level=logging.INFO)
+
+    logging.info("__________________________________________________________")
+    logging.info("____________ jstmc pypulseq sequence creation ____________")
+    logging.info("__________________________________________________________")
+    try:
+        main()
+    except Exception as e:
+        logging.exception(e)

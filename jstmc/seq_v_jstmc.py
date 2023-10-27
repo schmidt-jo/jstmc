@@ -72,6 +72,9 @@ class SeqJstmc(seq_baseclass.Sequence):
             for k in range(5):
                 self.block_list_fid_nav_acq[k].plot(path=self.interface.config.output_path, name=f"nav_acq_{k}")
 
+        # register slice select pulse grad kernels
+        self.kernel_pulses_slice_select = [self.block_excitation, self.block_refocus_1, self.block_refocus]
+
     # __ pypsi __
     # sampling + k traj
     def _set_k_trajectories(self):
@@ -292,7 +295,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                 # write sampling pattern
                 scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                  slice_num=self.trueSliceNum[idx_slice],
-                                                                 pe_num=self.k_pe_indexes[0, idx_n], echo_num=0,
+                                                                 pe_num=int(self.k_pe_indexes[0, idx_n]), echo_num=0,
                                                                  acq_type=self.id_acq_se)
 
                 # delay if necessary
@@ -305,8 +308,6 @@ class SeqJstmc(seq_baseclass.Sequence):
                     self._set_fa(echo_idx=echo_idx)
                     # set phase
                     self._set_phase_grad(echo_idx=echo_idx, phase_idx=idx_n)
-                    # set slice offset
-                    self._apply_slice_offset(idx_slice=idx_slice)
                     # add block
                     self.pp_seq.add_block(*self.block_refocus.list_events_to_ns())
                     # delay if necessary
@@ -318,7 +319,7 @@ class SeqJstmc(seq_baseclass.Sequence):
                     # write sampling pattern
                     scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                      slice_num=self.trueSliceNum[idx_slice],
-                                                                     pe_num=self.k_pe_indexes[echo_idx, idx_n],
+                                                                     pe_num=int(self.k_pe_indexes[echo_idx, idx_n]),
                                                                      echo_num=echo_idx, acq_type=self.id_acq_se)
 
                     # delay if necessary
@@ -425,14 +426,6 @@ class SeqJstmc(seq_baseclass.Sequence):
             log_module.error(err)
             raise AttributeError(err)
         self.block_spoil_end.grad_phase.amplitude[1:3] = - pe_end_amp
-
-    def _apply_slice_offset(self, idx_slice: int):
-        for sbb in [self.block_excitation, self.block_refocus_1, self.block_refocus]:
-            grad_slice_amplitude_hz = sbb.grad_slice.amplitude[sbb.grad_slice.t_array_s >= sbb.rf.t_delay_s][0]
-            sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * self.z[idx_slice]
-            # we are setting the phase of a pulse here into its phase offset var.
-            # To merge both: given phase parameter and any complex signal array data
-            sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
 
     def _apply_slice_offset_fid_nav(self, idx_nav: int):
         sbb = self.block_excitation_nav
