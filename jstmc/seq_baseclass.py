@@ -439,8 +439,8 @@ class Sequence(abc.ABC):
         return 1e3 / self.interface.specs.gamma * grad
 
     def _calculate_scan_time(self):
-        t_total = self.params.tr * 1e-3 * (
-                self.params.number_central_lines + self.params.number_outer_lines
+        t_total = (self.params.tr) * 1e-3 * (
+                self.params.number_central_lines + self.params.number_outer_lines + 1
         )
         log_module.info(f"\t\t-total scan time: {t_total / 60:.1f} min ({t_total:.1f} s)")
 

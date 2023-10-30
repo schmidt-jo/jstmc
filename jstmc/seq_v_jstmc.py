@@ -259,78 +259,90 @@ class SeqJstmc(seq_baseclass.Sequence):
         log_module.info(f"build -- calculate slice delay")
         self._calculate_slice_delay()
 
-    def _loop_lines(self):
-        # through phase encodes
-        line_bar = tqdm.trange(
-            self.params.number_central_lines + self.params.number_outer_lines, desc="phase encodes"
-        )
-        # counter for number of scan
-        scan_idx = 0
-        for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
-            for idx_slice in range(self.params.resolution_slice_num):
-                # looping through slices per phase encode
-                self._set_fa(echo_idx=0)
-                self._set_phase_grad(phase_idx=idx_n, echo_idx=0)
-                # apply slice offset
-                self._apply_slice_offset(idx_slice=idx_slice)
+    def _loop_slices(self, idx_pe_n: int, scan_idx: int, no_adc: bool = False):
+        # adc
+        if no_adc:
+            aq_block = self.block_acquisition.copy()
+            aq_block.adc = events.ADC()
+        else:
+            aq_block = self.block_acquisition
+        for idx_slice in np.arange(-1, self.params.resolution_slice_num):
+            # one loop as intro (-1)
+            self._set_fa(echo_idx=0)
+            # looping through slices per phase encode
+            self._set_phase_grad(phase_idx=idx_pe_n, echo_idx=0)
+            # apply slice offset
+            self._apply_slice_offset(idx_slice=idx_slice)
 
-                # excitation
+            # excitation
+            # add block
+            self.pp_seq.add_block(*self.block_excitation.list_events_to_ns())
+
+            # delay if necessary
+            if self.delay_exci_ref1.get_duration() > 1e-7:
+                self.pp_seq.add_block(self.delay_exci_ref1.to_simple_ns())
+
+            # first refocus
+            # add block
+            self.pp_seq.add_block(*self.block_refocus_1.list_events_to_ns())
+
+            # delay if necessary
+            if self.delay_ref_adc.get_duration() > 1e-7:
+                self.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
+
+            # adc
+            self.pp_seq.add_block(*aq_block.list_events_to_ns())
+            # write sampling pattern
+            scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                             slice_num=self.trueSliceNum[idx_slice],
+                                                             pe_num=int(self.k_pe_indexes[0, idx_pe_n]), echo_num=0,
+                                                             acq_type=self.id_acq_se)
+
+            # delay if necessary
+            if self.delay_ref_adc.get_duration() > 1e-7:
+                self.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
+
+            # loop
+            for echo_idx in np.arange(1, self.params.etl):
+                # set fa
+                self._set_fa(echo_idx=echo_idx)
+                # set phase
+                self._set_phase_grad(echo_idx=echo_idx, phase_idx=idx_pe_n)
                 # add block
-                self.pp_seq.add_block(*self.block_excitation.list_events_to_ns())
-
-                # delay if necessary
-                if self.delay_exci_ref1.get_duration() > 1e-7:
-                    self.pp_seq.add_block(self.delay_exci_ref1.to_simple_ns())
-
-                # first refocus
-                # add block
-                self.pp_seq.add_block(*self.block_refocus_1.list_events_to_ns())
-
+                self.pp_seq.add_block(*self.block_refocus.list_events_to_ns())
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
                     self.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
 
                 # adc
-                self.pp_seq.add_block(*self.block_acquisition.list_events_to_ns())
+                self.pp_seq.add_block(*aq_block.list_events_to_ns())
                 # write sampling pattern
                 scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                  slice_num=self.trueSliceNum[idx_slice],
-                                                                 pe_num=int(self.k_pe_indexes[0, idx_n]), echo_num=0,
-                                                                 acq_type=self.id_acq_se)
+                                                                 pe_num=int(self.k_pe_indexes[echo_idx, idx_pe_n]),
+                                                                 echo_num=echo_idx, acq_type=self.id_acq_se)
 
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
                     self.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
+            # spoil end
+            self._set_end_spoil_phase_grad()
+            self.pp_seq.add_block(*self.block_spoil_end.list_events_to_ns())
+            # insert slice delay
+            self.pp_seq.add_block(self.delay_slice.to_simple_ns())
+        return scan_idx
 
-                # loop
-                for echo_idx in np.arange(1, self.params.etl):
-                    # set fa
-                    self._set_fa(echo_idx=echo_idx)
-                    # set phase
-                    self._set_phase_grad(echo_idx=echo_idx, phase_idx=idx_n)
-                    # add block
-                    self.pp_seq.add_block(*self.block_refocus.list_events_to_ns())
-                    # delay if necessary
-                    if self.delay_ref_adc.get_duration() > 1e-7:
-                        self.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
-
-                    # adc
-                    self.pp_seq.add_block(*self.block_acquisition.list_events_to_ns())
-                    # write sampling pattern
-                    scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                     slice_num=self.trueSliceNum[idx_slice],
-                                                                     pe_num=int(self.k_pe_indexes[echo_idx, idx_n]),
-                                                                     echo_num=echo_idx, acq_type=self.id_acq_se)
-
-                    # delay if necessary
-                    if self.delay_ref_adc.get_duration() > 1e-7:
-                        self.pp_seq.add_block(self.delay_ref_adc.to_simple_ns())
-                # spoil end
-                self._set_end_spoil_phase_grad()
-                self.pp_seq.add_block(*self.block_spoil_end.list_events_to_ns())
-                # insert slice delay
-                self.pp_seq.add_block(self.delay_slice.to_simple_ns())
-
+    def _loop_lines(self):
+        # through phase encodes
+        line_bar = tqdm.trange(
+            self.params.number_central_lines + self.params.number_outer_lines, desc="phase encodes"
+        )
+        # one slice loop for introduction
+        _ = self._loop_slices(idx_pe_n=0, scan_idx=0, no_adc=True)
+        # counter for number of scan
+        scan_idx = 0
+        for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
+            scan_idx = self._loop_slices(idx_pe_n=idx_n, scan_idx=scan_idx)
             # navigators
             for nav_idx in range(self.nav_num):
                 self._apply_slice_offset_fid_nav(idx_nav=nav_idx)
