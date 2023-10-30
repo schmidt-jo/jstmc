@@ -73,55 +73,31 @@ class Kernel:
         # From Pulseq: According to the information from Klaus Scheffler and indirectly from Siemens this
         # is the present convention - the samples are shifted by 0.5 dwell
         t_start = self.adc.t_delay_s + self.adc.t_dwell_s / 2
-        # # set adc sampling point times
-        # t_adc_sampling = np.arange(self.adc.num_samples) * self.adc.t_dwell_s
-        # # interpolate grad amp values for adc positions
-        # grad_amp_for_t_adc = np.interp(t_start + t_adc_sampling, self.grad_read.t_array_s, self.grad_read.amplitude)
-        # # interpolate ramp / pre grad
-        # # pick timings
-        # t_pre = self.grad_read.t_array_s[self.grad_read.t_array_s <= t_start].tolist()
-        # grad_amps_pre = self.grad_read.amplitude[self.grad_read.t_array_s <= t_start].tolist()
-        # if t_start - t_pre[-1] > 1e-8:
-        #     # interpolate start amp
-        #     grad_amps_pre.append(np.interp(
-        #         t_start, [t_pre[-1], self.grad_read.t_array_s[self.grad_read.t_array_s > t_start][0]],
-        #         [grad_amps_pre[-1], self.grad_read.amplitude[self.grad_read.t_array_s > t_start][0]]
-        #     ))
-        #     # add start time
-        #     t_pre.append(t_start)
-        # # calculate k-position before start of adc
-        # area_pre = pre_read_area + np.trapz(grad_amps_pre, t_pre)
-        # # first adc position is at t_start, then we sample each dwell time in between the grad might change
-        # # hence we want to calculate the area between each step
-        #
-        # grad_areas_for_t_adc = np.zeros_like(grad_amp_for_t_adc)
-        # for amp_idx in np.arange(1, grad_areas_for_t_adc.shape[0]):
-        #     grad_areas_for_t_adc[amp_idx] = grad_areas_for_t_adc[amp_idx - 1] + np.trapz(
-        #         grad_amp_for_t_adc[amp_idx - 1:amp_idx + 1], dx=self.adc.t_dwell_s
-        #     )
 
         # set up times = want to include the gradient before adc start
-        t_adc_sampling = np.concatenate(
-            (
-                self.grad_read.t_array_s[self.grad_read.t_array_s <= t_start],
-                t_start + np.arange(self.adc.num_samples) * self.adc.t_dwell_s
-            ),
+        t_pre_adc_grad = np.concatenate(
+            (self.grad_read.t_array_s[self.grad_read.t_array_s <= t_start], np.array([t_start])),
             axis=0
+        )
+        t_adc_sampling = t_start + np.arange(self.adc.num_samples) * self.adc.t_dwell_s
+
+        # interpolate gradient amplitudes for pre grad and readout
+        grad_amp_pre_adc = np.interp(
+            x=t_pre_adc_grad, xp=self.grad_read.t_array_s, fp=self.grad_read.amplitude
         )
         grad_amp_adc_sampling = np.interp(
             x=t_adc_sampling, xp=self.grad_read.t_array_s, fp=self.grad_read.amplitude
         )
+
         # set array to hold grad areas cumulatively per sample
         grad_areas_for_t_adc = np.zeros(self.adc.num_samples)
 
         # calculate gradient area til first sample, including prephasing area
-        grad_areas_for_t_adc[0] = pre_read_area + np.trapz(
-            x=t_adc_sampling[t_adc_sampling <= t_start],
-            y=grad_amp_adc_sampling[t_adc_sampling <= t_start]
-        )
+        grad_areas_for_t_adc[0] = pre_read_area + np.trapz(x=t_pre_adc_grad, y=grad_amp_pre_adc)
+        # calculate gradient area for each sample iteratively, adding to the previous
         for amp_idx in np.arange(1, grad_areas_for_t_adc.shape[0]):
             grad_areas_for_t_adc[amp_idx] = grad_areas_for_t_adc[amp_idx - 1] + np.trapz(
-                grad_amp_adc_sampling[t_adc_sampling > t_start][amp_idx - 1:amp_idx + 1], dx=self.adc.t_dwell_s
+                grad_amp_adc_sampling[amp_idx - 1: amp_idx + 1], dx=self.adc.t_dwell_s
             )
         # calculate k-positions
         k_pos = grad_areas_for_t_adc / fs_grad_area
@@ -214,7 +190,7 @@ class Kernel:
         duration_min = np.max([duration_phase_grad, duration_pre_read, duration_spoiler])
 
         if pyp_interface.ext_rf_ref:
-            log_module.info(f"rf -- loading rfpf from file {pyp_interface.ext_rf_ref}")
+            log_module.info(f"rf -- loading pulse from file {pyp_interface.ext_rf_ref}")
             rf = events.RF.load_from_pypsi_pulse(
                 fname=pyp_interface.ext_rf_ref, system=system,
                 duration_s=pyp_interface.refocusing_duration * 1e-6, flip_angle_rad=np.pi,
@@ -296,7 +272,7 @@ class Kernel:
             return _instance
 
     @classmethod
-    def acquisition_fs(cls, pyp_params: pypsi.Params.pypulseq, system: pp.Opts):
+    def acquisition_fs(cls, pyp_params: pypsi.Params.pypulseq, system: pp.Opts, invert_grad_read_dir: bool = False):
         # block : adc + read grad
         log_module.info("setup acquisition")
         adc = events.ADC.make_adc(
@@ -306,20 +282,26 @@ class Kernel:
         )
         grad_read = events.GRAD.make_trapezoid(
             channel=pyp_params.read_dir,
-            flat_area=pyp_params.delta_k_read * pyp_params.resolution_n_read,
+            flat_area=(pyp_params.delta_k_read * pyp_params.resolution_n_read) * np.power(-1, int(invert_grad_read_dir)),
             flat_time=adc.t_duration_s,
             system=system
         )
-        delay = (grad_read.get_duration() - adc.t_duration_s) / 2
         # want to set adc symmetrically into grad read, and we want the middle adc sample to hit k space center.
+        t_mid_grad = grad_read.get_duration() / 2
+        # The 0th line counts as a positive line, hence we have one less line in plus then minus direction.
+        # we need to adress this when the readout gradient is inverted (i.e. its not just negating gradient amplitude)
+        # if k = n_read / 2, we have the sampling points range from -k ,..., 0, ... k-1
+        # if we reverse the direction of the gradient we need to go from k - 1, ..., 0, ... -k
+        # hence the middle 0 points is hit at different times
         # From Pulseq: According to the information from Klaus Scheffler and indirectly from Siemens this
         # is the present convention - the samples are shifted by 0.5 dwell
-        if (adc.t_dwell_s / 2 / system.adc_raster_time) % 1.0 > 1e-9:
-            warn = (f"cant account for dwell time / 2 sample shift in adc, within the adc delay. "
-                    f"Dwell / 2 is not on adc raster time.")
-            log_module.warning(warn)
-        else:
-            delay -= adc.t_dwell_s / 2
+        # we made sure n_read is divisible by 2.
+        n_adc_mid = int(pyp_params.resolution_n_read / 2 - int(invert_grad_read_dir)) * pyp_params.oversampling
+        t_adc_mid = n_adc_mid * adc.t_dwell_s
+        # if we want to hid t_mid grad after n_adc_mid samples (plus a sample start shift of 0.5 dwell), we need to
+        # calculate the right adc start delay
+        delay = t_mid_grad - t_adc_mid - adc.t_dwell_s / 2
+
         if delay < 0:
             err = f"adc longer than read gradient"
             log_module.error(err)
@@ -329,16 +311,6 @@ class Kernel:
             adc.t_delay_s = delay
         else:
             warn = "cant set adc delay to match read gradient bc its smaller than adc dead time."
-            log_module.warning(warn)
-        if delay < grad_read.t_array_s[1]:
-            t_diff = grad_read.t_array_s[1] - delay
-            t_diff = t_diff / system.adc_raster_time
-            # adc would start sampling already within the ramp.
-            warn = (f"adc delay shorter than ramp time by {t_diff:.2f} adc_raster_units. "
-                    f"adc dwell / 2 is {adc.t_dwell_s / 2 / system.adc_raster_time:.2f} adc_raster_units.\n"
-                    f"This might be deliberate to control the first sample "
-                    f"(especially if times are int units of adc raster). "
-                    f"But also might lead to unwanted read distortions, especially if half dwell time is less.")
             log_module.warning(warn)
         # sanity check
         if delay % system.adc_raster_time > 1e-9:
@@ -405,22 +377,23 @@ class Kernel:
         # the first half is omitted
         # ToDo: make this a parameter in settings
         log_module.info(f"partial fourier for 0th echo, factor: {pf_factor:.2f}")
-        num_acq_pts = int(pf_factor * pyp_interface.resolution_n_read)
+        num_acq_pts_wo_os = int(pf_factor * pyp_interface.resolution_n_read)
+        num_acq_pts_os = int(num_acq_pts_wo_os * pyp_interface.oversampling)
         # set adc
         adc = events.ADC.make_adc(
-            system=system, num_samples=int(num_acq_pts * pyp_interface.oversampling),
+            system=system, num_samples=num_acq_pts_os,
             dwell=pyp_interface.dwell
         )
         # we take the usual full sampling
         grad_read_fs = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir, system=system,
-            flat_area=pyp_interface.delta_k_read * num_acq_pts, flat_time=adc.t_duration_s
+            flat_area=pyp_interface.delta_k_read * num_acq_pts_wo_os, flat_time=adc.t_duration_s
         )
         # due to gradient raster the flat time might be prolonged. we need to figure out the placement of samples
         # and calculate t0
         # second half fully sampled
-        samples_to_right = int(pyp_interface.resolution_n_read / 2)
-        samples_to_left = num_acq_pts - samples_to_right
+        samples_to_right = int(pyp_interface.resolution_n_read * pyp_interface.oversampling / 2)
+        samples_to_left = num_acq_pts_os - samples_to_right
         # set adc to start at flat area
         adc.t_delay_s = grad_read_fs.t_array_s[1]
         # middle line is first point of samples to right, samples are shifted by dwell / 2
@@ -428,7 +401,7 @@ class Kernel:
         # we need to prephase read such that we arrive at 0 k in k-space at t0
         # calculate ramp area
         area_ramp = grad_read_fs.amplitude[1] * grad_read_fs.t_array_s[1] * 0.5
-        # calculate area to prephase
+        # calculate area to prephase = area
         area_pre_read = area_ramp + t0 * grad_read_fs.amplitude[1]
         # calculate area to rephase
         # we interpolate the amplitudes at all later points to calculate area

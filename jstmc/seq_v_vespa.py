@@ -44,11 +44,8 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         #     pyp_interface=self.params, system=self.pp_sys, invert_grad_dir=True
         # )
         self.block_gre_acq = Kernel.acquisition_fs(
-            pyp_params=self.params, system=self.pp_sys
+            pyp_params=self.params, system=self.pp_sys, invert_grad_read_dir=True
         )
-        # invert gradient
-        self.block_gre_acq.grad_read.area = - self.block_gre_acq.grad_read.area
-        self.block_gre_acq.grad_read.amplitude = - self.block_gre_acq.grad_read.amplitude
         # add id
         self.id_gre_acq: str = "gre_fs"
 

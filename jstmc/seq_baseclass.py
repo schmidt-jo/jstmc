@@ -109,7 +109,6 @@ class Sequence(abc.ABC):
         for key, val in d_extra.items():
             if def_conf.__getattribute__(key) != args.__getattribute__(key):
                 pypsi_params.pypulseq.__setattr__(val, args.__getattribute__(key))
-
         pypsi_params.display_sequence_configuration()
         return cls(pypsi_params=pypsi_params)
 

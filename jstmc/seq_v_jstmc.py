@@ -385,7 +385,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         scan_idx = 0
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             scan_idx = self._loop_slices(idx_pe_n=idx_n, scan_idx=scan_idx)
-            self._loop_navs(scan_idx=scan_idx)
+            scan_idx = self._loop_navs(scan_idx=scan_idx)
 
         log_module.info(f"sequence built!")
 
