@@ -56,6 +56,7 @@ def main():
 
         pyp_seq.plot(time_range=(0, 4e-3 * jstmc_seq.params.tr), time_disp='s')
         # seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
+        jstmc_seq.interface.visualize()
 
 
 if __name__ == '__main__':
