@@ -292,11 +292,12 @@ class SeqJstmc(seq_baseclass.Sequence):
 
             # adc
             self.pp_seq.add_block(*aq_block.list_events_to_ns())
-            # write sampling pattern
-            scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                             slice_num=self.trueSliceNum[idx_slice],
-                                                             pe_num=int(self.k_pe_indexes[0, idx_pe_n]), echo_num=0,
-                                                             acq_type=self.id_acq_se)
+            if not no_adc:
+                # write sampling pattern
+                scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                 slice_num=self.trueSliceNum[idx_slice],
+                                                                 pe_num=int(self.k_pe_indexes[0, idx_pe_n]), echo_num=0,
+                                                                 acq_type=self.id_acq_se)
 
             # delay if necessary
             if self.delay_ref_adc.get_duration() > 1e-7:
@@ -316,11 +317,12 @@ class SeqJstmc(seq_baseclass.Sequence):
 
                 # adc
                 self.pp_seq.add_block(*aq_block.list_events_to_ns())
-                # write sampling pattern
-                scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                 slice_num=self.trueSliceNum[idx_slice],
-                                                                 pe_num=int(self.k_pe_indexes[echo_idx, idx_pe_n]),
-                                                                 echo_num=echo_idx, acq_type=self.id_acq_se)
+                if not no_adc:
+                    # write sampling pattern
+                    scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
+                                                                     slice_num=self.trueSliceNum[idx_slice],
+                                                                     pe_num=int(self.k_pe_indexes[echo_idx, idx_pe_n]),
+                                                                     echo_num=echo_idx, acq_type=self.id_acq_se)
 
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
@@ -330,6 +332,46 @@ class SeqJstmc(seq_baseclass.Sequence):
             self.pp_seq.add_block(*self.block_spoil_end.list_events_to_ns())
             # insert slice delay
             self.pp_seq.add_block(self.delay_slice.to_simple_ns())
+        return scan_idx
+
+    def _loop_navs(self, scan_idx: int):
+        # navigators
+        for nav_idx in range(self.nav_num):
+            self._apply_slice_offset_fid_nav(idx_nav=nav_idx)
+            # excitation
+            # add block
+            self.pp_seq.add_block(*self.block_excitation_nav.list_events_to_ns())
+            # epi style nav read
+            # we set up a counter to track the phase encode line, k-space center is half of num lines
+            line_counter = 0
+            central_line = int(self.params.resolution_n_phase * self.nav_resolution_defactor / 2) - 1
+            # we set up the pahse encode increments
+            pe_increments = np.arange(1, int(self.params.resolution_n_phase * self.nav_resolution_defactor), 2)
+            pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
+            # we loop through all fid nav blocks (whole readout)
+            for b_idx in range(self.block_list_fid_nav_acq.__len__()):
+                # get the block
+                b = self.block_list_fid_nav_acq[b_idx]
+                # if at the end we add a delay
+                if (nav_idx == 1) & (b_idx == self.block_list_fid_nav_acq.__len__() - 1):
+                    self.pp_seq.add_block(self.delay_slice.to_simple_ns())
+                # otherwise we add the block
+                else:
+                    self.pp_seq.add_block(*b.list_events_to_ns())
+                # if we have a readout we write to sampling pattern file
+                # for navigators we want the 0th to have identifier 0, all minus directions have 1, all plus have 2
+                if b_idx % 2:
+                    nav_ident = "odd"
+                else:
+                    nav_ident = "even"
+                if b.adc.get_duration() > 0:
+                    # track which line we are writing from the incremental steps
+                    nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
+                    scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx, slice_num=nav_idx,
+                                                                     pe_num=nav_line_pe, echo_num=0,
+                                                                     acq_type=f"{self.id_acq_nav}_{nav_ident}",
+                                                                     echo_type="gre-fid", nav_acq=True)
+                    line_counter += 1
         return scan_idx
 
     def _loop_lines(self):
@@ -343,43 +385,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         scan_idx = 0
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             scan_idx = self._loop_slices(idx_pe_n=idx_n, scan_idx=scan_idx)
-            # navigators
-            for nav_idx in range(self.nav_num):
-                self._apply_slice_offset_fid_nav(idx_nav=nav_idx)
-                # excitation
-                # add block
-                self.pp_seq.add_block(*self.block_excitation_nav.list_events_to_ns())
-                # epi style nav read
-                # we set up a counter to track the phase encode line, k-space center is half of num lines
-                line_counter = 0
-                central_line = int(self.params.resolution_n_phase * self.nav_resolution_defactor / 2) - 1
-                # we set up the pahse encode increments
-                pe_increments = np.arange(1, int(self.params.resolution_n_phase * self.nav_resolution_defactor), 2)
-                pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
-                # we loop through all fid nav blocks (whole readout)
-                for b_idx in range(self.block_list_fid_nav_acq.__len__()):
-                    # get the block
-                    b = self.block_list_fid_nav_acq[b_idx]
-                    # if at the end we add a delay
-                    if (nav_idx == 1) & (b_idx == self.block_list_fid_nav_acq.__len__() - 1):
-                        self.pp_seq.add_block(self.delay_slice.to_simple_ns())
-                    # otherwise we add the block
-                    else:
-                        self.pp_seq.add_block(*b.list_events_to_ns())
-                    # if we have a readout we write to sampling pattern file
-                    # for navigators we want the 0th to have identifier 0, all minus directions have 1, all plus have 2
-                    if b_idx % 2:
-                        nav_ident = "odd"
-                    else:
-                        nav_ident = "even"
-                    if b.adc.get_duration() > 0:
-                        # track which line we are writing from the incremental steps
-                        nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
-                        scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx, slice_num=nav_idx,
-                                                                         pe_num=nav_line_pe, echo_num=0,
-                                                                         acq_type=f"{self.id_acq_nav}_{nav_ident}",
-                                                                         echo_type="gre-fid", nav_acq=True)
-                        line_counter += 1
+            self._loop_navs(scan_idx=scan_idx)
 
         log_module.info(f"sequence built!")
 
