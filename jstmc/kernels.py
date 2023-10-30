@@ -367,11 +367,6 @@ class Kernel:
             area=pyp_interface.delta_k_phase * pe_increments[line_num],
             system=system
         )
-        # adc needs at least dead time upon switch on
-        # acquisition_window = set_on_grad_raster_time(
-        #     system=system,
-        #     time=pyp_interface.dwell * num_samples_per_read * pyp_interface.oversampling + system.adc_dead_time
-        # )
         log_module.debug(f" pe line: {np.sum(pe_increments[:line_num])}")
         grad_read = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir,
@@ -411,37 +406,61 @@ class Kernel:
         # ToDo: make this a parameter in settings
         log_module.info(f"partial fourier for 0th echo, factor: {pf_factor:.2f}")
         num_acq_pts = int(pf_factor * pyp_interface.resolution_n_read)
-        # set acquisition time on raster
-        acq_time_fs = set_on_grad_raster_time(
-            system=system, time=pyp_interface.dwell * num_acq_pts * pyp_interface.oversampling
+        # set adc
+        adc = events.ADC.make_adc(
+            system=system, num_samples=int(num_acq_pts * pyp_interface.oversampling),
+            dwell=pyp_interface.dwell
         )
         # we take the usual full sampling
         grad_read_fs = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir, system=system,
-            flat_area=pyp_interface.delta_k_read * num_acq_pts, flat_time=acq_time_fs
+            flat_area=pyp_interface.delta_k_read * num_acq_pts, flat_time=adc.t_duration_s
         )
+        # due to gradient raster the flat time might be prolonged. we need to figure out the placement of samples
+        # and calculate t0
+        # second half fully sampled
+        samples_to_right = int(pyp_interface.resolution_n_read / 2)
+        samples_to_left = num_acq_pts - samples_to_right
+        # set adc to start at flat area
+        adc.t_delay_s = grad_read_fs.t_array_s[1]
+        # middle line is first point of samples to right, samples are shifted by dwell / 2
+        t0 = (samples_to_left + 0.5) * adc.t_dwell_s
+        # we need to prephase read such that we arrive at 0 k in k-space at t0
+        # calculate ramp area
         area_ramp = grad_read_fs.amplitude[1] * grad_read_fs.t_array_s[1] * 0.5
-        area_pre_read = (1 - 0.5 / pf_factor) * grad_read_fs.flat_area + area_ramp
+        # calculate area to prephase
+        area_pre_read = area_ramp + t0 * grad_read_fs.amplitude[1]
+        # calculate area to rephase
+        # we interpolate the amplitudes at all later points to calculate area
+        times = np.array(
+            [
+                t0 + adc.t_delay_s,     # central k - space point
+                *grad_read_fs.t_array_s[grad_read_fs.t_array_s > t0 + adc.t_delay_s]
+                # gradient time points reached afterwards
+            ]
+        )
+        amps = np.interp(
+            x=times,
+            xp=grad_read_fs.t_array_s,
+            fp=grad_read_fs.amplitude
+        )
+        area_post_read = np.trapz(x=times, y=amps)
 
-        adc_duration = int(num_acq_pts * pyp_interface.oversampling) * pyp_interface.dwell
-        adc_delay = (acq_time_fs - adc_duration) / 2  # distribute duration difference from raster time differences
-        # add ramp
-        adc_delay += grad_read_fs.t_array_s[1]
-        if adc_delay < system.adc_dead_time:
+        if adc.t_delay_s < system.adc_dead_time:
             warn = f"adc delay will be bigger than set, due to system dead time constraints"
             log_module.warning(warn)
-        adc = events.ADC.make_adc(
-            system=system, num_samples=int(num_acq_pts * pyp_interface.oversampling),
-            delay_s=adc_delay, dwell=pyp_interface.dwell
-        )
+        # sanity check
+        grad_area = grad_read_fs.area
+        if np.abs(np.trapz(x=grad_read_fs.t_array_s, y=grad_read_fs.amplitude) - grad_area) > 1e-9:
+            logging.error(f"pf read gradient area calculation error")
+        if np.abs(grad_area - area_pre_read - area_post_read) > 1e-9:
+            logging.error(f"gradient 0th echo rewind calculation error")
         acq_block = cls()
         acq_block.grad_read = grad_read_fs
         acq_block.adc = adc
 
-        t_middle = grad_read_fs.t_flat_time_s * (1 - pf_factor) + grad_read_fs.t_array_s[1]
-        acq_block.t_mid = t_middle
+        acq_block.t_mid = t0 + adc.t_delay_s
 
-        # get k_space trajectory
         return acq_block, area_pre_read
 
     @classmethod
