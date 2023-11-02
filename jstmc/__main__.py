@@ -1,4 +1,4 @@
-from jstmc import options, seq_v_jstmc, seq_v_vespa
+from jstmc import options, seq_v_jstmc, seq_v_vespa, plotting
 import numpy as np
 import logging
 import pathlib as plib
@@ -28,10 +28,11 @@ def main():
     logging.info(f"Total Scan Time Sum Seq File: {scan_time / 60:.1f} min")
 
     logging.info("Verifying and Writing Files")
+    outpath = plib.Path(jstmc_seq.interface.config.output_path).absolute()
     # verifying
     if jstmc_seq.params.report:
-        outpath = plib.Path(jstmc_seq.interface.config.output_path).absolute().joinpath("report.txt")
-        with open(outpath, "w") as w_file:
+        out_file = outpath.joinpath("report.txt")
+        with open(out_file, "w") as w_file:
             report = pyp_seq.test_report()
             ok, err_rep = pyp_seq.check_timing()
             log = "report \n" + report + "\ntiming_check \n" + str(ok) + "\ntiming_error \n"
@@ -47,15 +48,8 @@ def main():
 
     if jstmc_seq.interface.config.visualize:
         logging.info("Plotting")
-        # give z and slice thickness both with same units. here mm
-        # utils.plot_slice_acquisition(z * 1e3, seq.interface.resolutionSliceThickness)
-        # utils.plot_sampling_pattern(sampling_pattern, seq_vars=seq)
-
-        # utils.pretty_plot_et(seq, t_start=1e3 * scan_time / 2 - 2 * seq.interface.TR,
-        #                      save=Path(options.RXV_Sequence.config.outputPath).absolute().joinpath("echo_train_semc"))
-
-        pyp_seq.plot(time_range=(0, 4e-3 * jstmc_seq.params.tr), time_disp='s')
-        # seq.ppSeq.plot(time_range=(scan_time - 2e-3 * seq.params.TR, scan_time - 1e-6), time_disp='s')
+        # pyp_seq.plot(time_range=(0, 4e-3 * jstmc_seq.params.tr), time_disp='s')
+        plotting.plot_seq(pyp_seq, out_path=outpath, name="seq_10s")
         jstmc_seq.interface.visualize()
 
 
