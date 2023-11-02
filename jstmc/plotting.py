@@ -1,16 +1,23 @@
 import typing
 import plotly.express as px
+import plotly.graph_objects as go
+import plotly.subplots as psub
 import logging
 import pandas as pd
 import pathlib as plib
+import pypulseq as pp
+import numpy as np
 log_module = logging.getLogger(__name__)
 
 
+def create_fig_dir_ensure_exists(path: plib.Path):
+    fig_path = plib.Path(path).absolute().joinpath("plots/")
+    fig_path.mkdir(parents=True, exist_ok=True)
+    return fig_path
+
 def plot_grad_moms(mom_df: pd.DataFrame, out_path: typing.Union[plib.Path, str], name: str):
     fig = px.line(mom_df, x="id", y="moments", color="axis")
-
-    fig_path = plib.Path(out_path).absolute().joinpath("plots/")
-    fig_path.mkdir(parents=True, exist_ok=True)
+    fig_path = create_fig_dir_ensure_exists(out_path)
     fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(".html")
     log_module.info(f"\t\t - writing file: {fig_path.as_posix()}")
     fig.write_html(fig_path.as_posix())
@@ -18,9 +25,169 @@ def plot_grad_moms(mom_df: pd.DataFrame, out_path: typing.Union[plib.Path, str],
 
 def plot_grad_moments(mom_df: pd.DataFrame, out_path: typing.Union[plib.Path, str], name: str):
     fig = px.scatter(mom_df, x="time", y="moments", color="id")
+    fig_path = create_fig_dir_ensure_exists(out_path)
+    fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(".html")
+    log_module.info(f"\t\t - writing file: {fig_path.as_posix()}")
+    fig.write_html(fig_path.as_posix())
 
-    fig_path = plib.Path(out_path).absolute().joinpath("plots/")
-    fig_path.mkdir(parents=True, exist_ok=True)
+
+def plot_seq(seq: pp.Sequence, out_path: typing.Union[plib.Path, str], name: str,
+             t_start_s: float = 0.0, t_end_s: float = 10.0):
+    gamma = 42577478.518
+    logging.debug(f"plot_seq")
+    # transform to us
+    t_start_us = int(t_start_s * 1e6)
+    t_end_us = int(t_end_s * 1e6)
+    t_total_us = t_end_us - t_start_us
+    if t_total_us < 1:
+        err = f"end time needs to be after start time"
+        log_module.error(err)
+        raise ValueError(err)
+    # find starting idx
+    start_idx = 0
+    t_cum_us = 0
+    # go through blocks
+    for block_idx in range(len(seq.block_durations)):
+        t_cum_us += 1e6 * seq.block_durations[block_idx]
+        if t_cum_us > t_start_us:
+            start_idx = block_idx
+            break
+        if block_idx == len(seq.block_durations) - 1:
+            err = (f"looped through sequence blocks to get to {t_cum_us} us, "
+                   f"and didnt arrive at starting time given {t_start_us} us")
+            log_module.error(err)
+            raise AttributeError(err)
+    t_cum_us = 0
+    # set up lists to fill with values
+    times = []
+    values = []
+    labels = []
+    pages = []
+
+    grad_channels = ['gx', 'gy', 'gz']
+
+    def append_to_lists(time: float | int | list, value: float | list, label: str, page: int):
+        if isinstance(time, float) or isinstance(time, int):
+            times.append(time)
+            values.append(value)
+            labels.append(label)
+            pages.append(page)
+        else:
+            times.extend(time)
+            values.extend(value)
+            labels.extend([label] * len(time))
+            pages.extend([page] * len(time))
+
+    # start with first block after start time
+    for block_idx in np.arange(start_idx, len(seq.block_durations)):
+        # set start block
+        t0 = t_cum_us
+        block = seq.get_block(block_idx + 1)
+        if t_cum_us + 1e6 * seq.block_durations[block_idx] > t_total_us:
+            break
+
+        if getattr(block, 'rf') is not None:
+            rf = block.rf
+            start = t0 + int(1e6 * rf.delay)
+            # starting point at 0
+            append_to_lists(start - 1e-6, 0.0, label="RF amp", page=0)
+            append_to_lists(start - 1e-6, 0.0, label="RF phase", page=0)
+            t_rf = rf.t * 1e6
+            signal = np.abs(rf.signal)
+            angle = np.angle(
+                rf.signal * np.exp(1j * rf.phase_offset) * np.exp(1j * 2 * np.pi * rf.t * rf.freq_offset)
+            )
+
+            append_to_lists(time=(t_rf + start).tolist(), value=signal.tolist(), label="RF amp", page=0)
+            append_to_lists(time=(t_rf + start).tolist(), value=angle.tolist(), label="RF phase", page=0)
+            # set back to 0
+            append_to_lists(t_rf[-1] + start + 1e-6, 0.0, label="RF amp", page=0)
+            append_to_lists(t_rf[-1] + start + 1e-6, 0.0, label="RF phase", page=0)
+
+        for x in range(len(grad_channels)):
+            page = 1 - int(x == 2)
+            if getattr(block, grad_channels[x]) is not None:
+                grad = getattr(block, grad_channels[x])
+                if grad.type == 'trap':
+                    amp_value = 1e3 * grad.amplitude / gamma
+                elif grad.type == 'grad':
+                    amp_value = 1e3 * grad.waveform / gamma
+                else:
+                    amp_value = 0
+                start = int(t0 + 1e6 * grad.delay)
+                t = grad.tt * 1e6
+                append_to_lists(time=start + t, value=amp_value, label=f"GRAD {grad_channels[x]}", page=page)
+
+        # %%
+        if getattr(block, 'adc') is not None:
+            adc = block.adc
+            start = int(t0 + 1e6 * adc.delay)
+            # set starting point to 0
+            append_to_lists(time=start - 1e-6, value=0.0, label="ADC", page=1)
+            end = int(start + adc.dwell * adc.num_samples * 1e6)
+            dead_time = int(end + 1e6 * adc.dead_time)
+            append_to_lists(time=[start, end, end + 1e-6, dead_time], value=[1.0, 1.0, 0.2, 0.2], label="ADC", page=1)
+            # set end point to 0
+            append_to_lists(time=dead_time + 1e-6, value=0.0, label="ADC", page=1)
+        t_cum_us += int(1e6 * getattr(block, 'block_duration'))
+
+    # build df
+    df = pd.DataFrame({
+        "data": values, "time": times, "labels": labels, "pages": pages
+    })
+    # fig = px.scatter(df, x="time", y="data", color="labels", facet_row="pages")
+    fig = psub.make_subplots(
+        2, 1,
+        specs=[[{"secondary_y": True}], [{"secondary_y": True}]],
+        shared_xaxes=True
+    )
+
+    # top axis left
+    tmp_df = df[df["labels"] == "RF amp"]
+    tmp_df.loc[:, "data"] = tmp_df["data"] / tmp_df["data"].max() * np.pi
+    fig.add_trace(
+        go.Scattergl(x=tmp_df["time"], y=tmp_df["data"], name="RF Amplitude"),
+        1, 1, secondary_y=False
+    )
+    tmp_df = df[df["labels"] == "RF phase"]
+    fig.add_trace(
+        go.Scattergl(x=tmp_df["time"], y=tmp_df["data"], name="RF Phase [rad]", opacity=0.4),
+        1, 1, secondary_y=False
+    )
+    # axes properties
+    fig.update_yaxes(title_text="RF Amplitude & Phase", range=[-3.5, 3.5], row=1, col=1, secondary_y=False)
+    # top axis right
+    tmp_df = df[df["labels"] == "GRAD gz"]
+    fig.add_trace(
+        go.Scattergl(x=tmp_df["time"], y=tmp_df["data"], name="Gradient gz"),
+        1, 1, secondary_y=True
+    )
+    fig.update_yaxes(
+        title_text="Gradient Slice [mT/m]",
+        range=[-1.2*np.max(np.abs(tmp_df["data"].to_numpy())), 1.2*np.max(np.abs(tmp_df["data"].to_numpy()))],
+        row=1, col=1, secondary_y=True
+    )
+    # bottom axis left
+    tmp_df = df[df["labels"] == "ADC"]
+    fig.add_trace(
+        go.Scattergl(x=tmp_df["time"], y=tmp_df["data"], name="ADC", fill="tozeroy", opacity=0.5),
+        2, 1, secondary_y=False
+    )
+    fig.update_xaxes(title_text="Time [us]", row=2, col=1)
+    fig.update_yaxes(title_text="ADC", range=[-1.5, 1.5], row=2, col=1, secondary_y=False)
+    # bottom axis right
+    max_val = 40
+    for k in range(2):
+        tmp_df = df[df["labels"] == f"GRAD {grad_channels[k]}"]
+        fig.add_trace(
+            go.Scattergl(x=tmp_df["time"], y=tmp_df["data"], name=f"Gradient {grad_channels[k]}d [mT/m]"),
+            2, 1, secondary_y=True
+        )
+        if max_val < np.max(np.abs(tmp_df["data"].to_numpy())):
+            max_val = np.max(np.abs(tmp_df["data"].to_numpy()))
+    fig.update_yaxes(title_text="Gradient [mT/m]", range=[-1.2 * max_val, 1.2*max_val], row=2, col=1, secondary_y=True)
+
+    fig_path = create_fig_dir_ensure_exists(out_path)
     fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(".html")
     log_module.info(f"\t\t - writing file: {fig_path.as_posix()}")
     fig.write_html(fig_path.as_posix())
