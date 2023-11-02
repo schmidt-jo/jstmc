@@ -60,13 +60,16 @@ class Sequence(abc.ABC):
     # create
     @classmethod
     def from_cli(cls, args: options.Config):
+        # create class instance
         pypsi_params = pypsi.Params()
+        # load different part of cli arguments
         loads = [args.i, args.s]
         msg = ["sequence configuration", "system specifications"]
         att = ["pypulseq", "specs"]
         for l_idx in range(len(loads)):
             # make plib Path
             l_file = plib.Path(loads[l_idx]).absolute()
+            # check files are provided
             if not l_file.is_file():
                 if l_idx == 0:
                     err = f"A {msg[l_idx]} file needs to be provided and {l_file} was not found to be a valid file."
@@ -77,6 +80,7 @@ class Sequence(abc.ABC):
                            f" Falling back to defaults! Check carefully!"
                     log_module.warning(warn)
             log_module.info(f"loading {msg[l_idx]}: {l_file.as_posix()}")
+            # set attributes
             pypsi_params.__setattr__(att[l_idx], pypsi_params.__getattribute__(att[l_idx]).load(l_file))
 
         if args.o:
@@ -432,7 +436,7 @@ class Sequence(abc.ABC):
             sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * self.z[idx_slice]
             # we are setting the phase of a pulse here into its phase offset var.
             # To merge both: given phase parameter and any complex signal array data
-            sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
+            sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.t_mid
 
     def _set_grad_for_emc(self, grad):
         return 1e3 / self.interface.specs.gamma * grad

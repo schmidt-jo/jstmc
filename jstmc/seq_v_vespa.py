@@ -169,7 +169,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             delay_s=self.block_excitation.rf.t_delay_s + self.block_excitation.rf.t_duration_s
         )
         grad_phase = events.GRAD.make_trapezoid(
-            channel=self.params.phase_dir, system=self.pp_sys, area=-np.max(self.phase_areas),
+            channel=self.params.phase_dir, system=self.pp_sys, area=-np.max(np.abs(self.phase_areas)),
             duration_s=rephasing_time,
             delay_s=self.block_excitation.rf.t_delay_s + self.block_excitation.rf.t_duration_s
         )

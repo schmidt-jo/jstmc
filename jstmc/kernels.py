@@ -157,13 +157,21 @@ class Kernel:
 
     @classmethod
     def refocus_slice_sel_spoil(cls, pyp_interface: pypsi.Params.pypulseq, system: pp.Opts,
-                                pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False):
-        # calculate read gradient in order to use correct area (corrected for ramps
-        grad_read = events.GRAD.make_trapezoid(
+                                pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False,
+                                read_gradient_to_prephase: float = None):
+        if read_gradient_to_prephase is None:
+            # calculate read gradient in order to use correct area (corrected for ramps
+            grad_read = events.GRAD.make_trapezoid(
+                channel=pyp_interface.read_dir, system=system,
+                flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read,
+                flat_time=pyp_interface.acquisition_time
+            )
+            read_gradient_to_prephase = 1 / 2 * grad_read.area
+        grad_read_pre = events.GRAD.make_trapezoid(
             channel=pyp_interface.read_dir, system=system,
-            flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read,
-            flat_time=pyp_interface.acquisition_time
+            area=- read_gradient_to_prephase
         )
+
         # block is first refocusing + spoiling + phase encode
         log_module.info(f"setup refocus {pulse_num + 1}")
         # set up longest phase encode
@@ -178,14 +186,8 @@ class Kernel:
             time=grad_phase.get_duration(), system=system
         )
 
-        # build read spoiler
-        grad_prewind_read = events.GRAD.make_trapezoid(
-            channel=pyp_interface.read_dir,
-            area=1 / 2 * grad_read.area,
-            system=system,
-        )
         duration_pre_read = set_on_grad_raster_time(
-            system=system, time=grad_prewind_read.get_duration())
+            system=system, time=grad_read_pre.get_duration())
 
         duration_min = np.max([duration_phase_grad, duration_pre_read, duration_spoiler])
 
@@ -237,15 +239,15 @@ class Kernel:
                 system=system, channel=pyp_interface.phase_dir, area_lobe=max_phase_grad_area,
                 duration_lobe=duration_phase_grad, duration_between=t_duration_between, reverse_second_lobe=True
             )
-            grad_read_prewind = events.GRAD.sym_grad(
-                system=system, channel=pyp_interface.read_dir, area_lobe=- grad_read.area / 2,
+            grad_read_pre = events.GRAD.sym_grad(
+                system=system, channel=pyp_interface.read_dir, area_lobe=- read_gradient_to_prephase,
                 duration_lobe=duration_pre_read,
-                duration_between=rf.t_duration_s
+                duration_between=t_duration_between
             )
         else:
-            grad_read_prewind = events.GRAD.make_trapezoid(
+            grad_read_pre = events.GRAD.make_trapezoid(
                 channel=pyp_interface.read_dir,
-                area=- grad_read.area / 2,
+                area=- read_gradient_to_prephase,
                 duration_s=duration_pre_read,  # given in [s] via options
                 system=system,
             )
@@ -259,12 +261,12 @@ class Kernel:
             delay_phase_grad = rf.t_delay_s + rf.t_duration_s
             grad_phase.t_delay_s = delay_phase_grad
             # adjust read start
-            grad_read_prewind.t_delay_s = delay_phase_grad
+            grad_read_pre.t_delay_s = delay_phase_grad
 
         # finished block
         _instance = cls(
             rf=rf, grad_slice=grad_slice,
-            grad_phase=grad_phase, grad_read=grad_read_prewind
+            grad_phase=grad_phase, grad_read=grad_read_pre
         )
         if return_pe_time:
             return _instance, grad_phase.set_on_raster(duration_phase_grad)
@@ -280,14 +282,25 @@ class Kernel:
             dwell=pyp_params.dwell,
             system=system
         )
+        # calculate time for oversampling * dwells more
+        t_adc_extended = int((pyp_params.resolution_n_read + 1) * pyp_params.oversampling) * pyp_params.dwell
+        # calculate area for 1 read point more, s.th. flat area for original number read stays the same
+        flat_area = (
+            pyp_params.delta_k_read * (pyp_params.resolution_n_read + 1)
+                    ) * np.power(-1, int(invert_grad_read_dir))
+        # make at least oversampling * dwell and adc dead time to fit into the falling ramp
+        # since we need to shift the adc samples correctly depending on the grad direction
+        ramp_times = adc.t_dead_time_s + pyp_params.oversampling * adc.t_dwell_s
+        # both adjustments together should prohibit adc stretching out of gradient flat time
         grad_read = events.GRAD.make_trapezoid(
             channel=pyp_params.read_dir,
-            flat_area=(pyp_params.delta_k_read * pyp_params.resolution_n_read) * np.power(-1, int(invert_grad_read_dir)),
-            flat_time=adc.t_duration_s,
+            ramp_time=ramp_times,
+            flat_area=flat_area,
+            flat_time=t_adc_extended,
             system=system
         )
         # want to set adc symmetrically into grad read, and we want the middle adc sample to hit k space center.
-        t_mid_grad = grad_read.get_duration() / 2
+        t_mid_grad = grad_read.t_mid
         # The 0th line counts as a positive line, hence we have one less line in plus then minus direction.
         # we need to adress this when the readout gradient is inverted (i.e. its not just negating gradient amplitude)
         # if k = n_read / 2, we have the sampling points range from -k ,..., 0, ... k-1
@@ -296,9 +309,9 @@ class Kernel:
         # From Pulseq: According to the information from Klaus Scheffler and indirectly from Siemens this
         # is the present convention - the samples are shifted by 0.5 dwell
         # we made sure n_read is divisible by 2.
-        n_adc_mid = int(pyp_params.resolution_n_read / 2 - int(invert_grad_read_dir)) * pyp_params.oversampling
+        n_adc_mid = int((pyp_params.resolution_n_read / 2 - int(invert_grad_read_dir) / 2) * pyp_params.oversampling)
         t_adc_mid = n_adc_mid * adc.t_dwell_s
-        # if we want to hid t_mid grad after n_adc_mid samples (plus a sample start shift of 0.5 dwell), we need to
+        # if we want to hit t_mid grad after n_adc_mid samples (plus a sample start shift of 0.5 dwell), we need to
         # calculate the right adc start delay
         delay = t_mid_grad - t_adc_mid - adc.t_dwell_s / 2
 
@@ -306,20 +319,24 @@ class Kernel:
             err = f"adc longer than read gradient"
             log_module.error(err)
             raise ValueError(err)
-        # delay remains dead time if its bigger
-        if delay > system.adc_dead_time:
-            adc.t_delay_s = delay
-        else:
-            warn = "cant set adc delay to match read gradient bc its smaller than adc dead time."
-            log_module.warning(warn)
         # sanity check
         if delay % system.adc_raster_time > 1e-9:
             # adc delay not fitting on adc raster
             warn = "adc delay set not multiple of adc raster. might lead to small timing deviations in actual .seq file"
             log_module.warning(warn)
-
+        # send warning if last adc reaches into ramp
+        if adc.get_duration() > grad_read.get_duration() - grad_read.t_fall_time_s:
+            warn = (f"adc duration beyond gradient flat time, reaching into ramp."
+                    f"This would shift k-space samples to unwanted positions. check calculations.")
+            log_module.warning(warn)
         adc.t_delay_s = delay
         # finished block
+        if adc.get_duration() > grad_read.get_duration():
+            err = (f"adc duration longer than read gradient duration. \n"
+                   f"this might happen from the shifting of the adc samplings to fit the middle of the gradient. \n"
+                   f"it shouldnt since we specified enough room for the adc in the gradient ramps, check calculations!")
+            log_module.error(err)
+            raise AttributeError(err)
         return cls(adc=adc, grad_read=grad_read)
 
     @classmethod
@@ -709,10 +726,19 @@ class Kernel:
 
         # adc
         if self.adc.get_duration() > 0:
-            times = (np.array([
-                0, self.adc.t_delay_s - 1e-9, self.adc.t_delay_s + 1e-9,
-                   self.adc.get_duration() - 1e-9, self.adc.get_duration() + 1e-9]) * 1e6).astype(int)
-            amp = np.array([0, 0, 1, 1, 0])
+            times = (
+                    np.array([
+                        0,
+                        self.adc.t_delay_s - 1e-9,
+                        self.adc.t_delay_s + 1e-9,
+                        self.adc.t_delay_s + self.adc.t_duration_s - 1e-9,
+                        self.adc.t_delay_s + self.adc.t_duration_s + 1e-9,
+                        self.adc.get_duration() - 1e-9,
+                        self.adc.get_duration() + 1e-9
+                    ]) * 1e6
+            ).astype(int)
+            amp = np.array([0, 0, 1, 1, 0.25, 0.2, 0])
+            # we sketch dead time here
             # add
             arr_time = np.concatenate((arr_time, times), axis=0)
             amplitude = np.concatenate((amplitude, amp), axis=0)

@@ -20,6 +20,8 @@ class Event:
     def __init__(self):
         self.t_duration_s: float = 0.0
         self.system: pp.Opts = NotImplemented
+        self.t_mid: float = 0.0
+        # can attribute the timing of the middle event for using gradients and calculate timing.
 
     def get_duration(self):
         raise NotImplementedError
@@ -95,6 +97,7 @@ class RF(Event):
         rf_instance.t_delay_s = delay_s
         rf_instance.t_ringdown_s = system.rf_ringdown_time
         rf_instance.t_dead_time_s = system.rf_dead_time
+        rf_instance._set_central_time()
         return rf_instance
 
     @classmethod
@@ -138,6 +141,7 @@ class RF(Event):
 
         rf_instance.signal = rf_simple_ns.signal
         rf_instance.system = system
+        rf_instance._set_central_time()
         return rf_instance
 
     @classmethod
@@ -181,6 +185,7 @@ class RF(Event):
 
         rf_instance.signal = rf_simple_ns.signal
         rf_instance.system = system
+        rf_instance._set_central_time()
         return rf_instance
 
     def get_duration(self):
@@ -210,12 +215,14 @@ class RF(Event):
             type='rf'
         )
 
-    def calculate_center(self):
+    def _set_central_time(self):
         """
         calculate the central point of rf shape
-        for now assume middle, but can extend to max
         """
-        return self.t_duration_s / 2
+        # Detect the excitation peak; if i is a plateau take its center
+        rf_max = np.max(np.abs(self.signal))
+        i_peak = np.where(np.abs(self.signal) >= rf_max * 0.99999)[0]
+        self.t_mid = (self.t_array_s[i_peak[0]] + self.t_array_s[i_peak[-1]]) / 2
 
     def plot(self):
         fig = plt.figure()
@@ -233,7 +240,7 @@ class GRAD(Event):
         super().__init__()
         self.channel: str = 'z'
         self.amplitude: typing.Union[float, np.ndarray] = 0.0
-        self.area: typing.Union[float,np.ndarray] = 0.0
+        self.area: typing.Union[float, np.ndarray] = 0.0
         self.flat_area: float = 0.0
 
         self.t_array_s: np.ndarray = np.zeros(0)
@@ -270,7 +277,7 @@ class GRAD(Event):
     def make_trapezoid(cls, channel: str, system: pp.Opts, amplitude: float = 0.0, area: float = None,
                        delay_s: float = 0.0, duration_s: float = 0.0,
                        flat_area: float = 0.0, flat_time: float = -1.0,
-                       rise_time: float = 0.0):
+                       ramp_time: float = 0.0):
         grad_instance = cls()
         grad_instance.system = system
         # some timing checks
@@ -291,8 +298,8 @@ class GRAD(Event):
                     flat_area *= flat_time / flat_time_set
         if duration_s > 1e-7:
             duration_s = grad_instance.set_on_raster(duration_s, double=False)
-        if rise_time > 1e-7:
-            rise_time = grad_instance.set_on_raster(rise_time, double=False)
+        if ramp_time > 1e-7:
+            ramp_time = grad_instance.set_on_raster(ramp_time, double=False)
 
         grad_simple_ns = pp.make_trapezoid(
             channel=channel,
@@ -302,7 +309,8 @@ class GRAD(Event):
             duration=duration_s,
             flat_area=flat_area,
             flat_time=flat_time,
-            rise_time=rise_time,
+            rise_time=ramp_time,
+            fall_time=ramp_time,
             system=system
         )
         grad_instance.channel = channel
@@ -328,6 +336,7 @@ class GRAD(Event):
         grad_instance.max_slew = system.max_slew
         grad_instance.max_grad = system.max_grad
         grad_instance.t_duration_s = grad_instance.get_duration()
+        grad_instance.t_mid = grad_instance.get_duration() / 2
         return grad_instance
 
     @classmethod
@@ -511,11 +520,12 @@ class GRAD(Event):
                         # second part is set by ramp down
                         duration_re_grad = t1 + t2
                         # sanity check. build area only with ramp, check if we match wanted area
-                        ramp_area = np.trapz(x=[0, t1, t1+t2], y=[amplitude, mid_amp, 0])
+                        ramp_area = np.trapz(x=[0, t1, t1 + t2], y=[amplitude, mid_amp, 0])
                         if np.abs(ramp_area - areas[-1]) > 1e-9:
-                            warn = (f"ramp area ({ramp_area:.2f}) not accommodating needed rephasing area ({areas[-1]:.2f})."
-                                    f" This can be due to ramp time set on raster time. "
-                                    f"Could be avoided with higher spoiling gradient. ")
+                            warn = (
+                                f"ramp area ({ramp_area:.2f}) not accommodating needed rephasing area ({areas[-1]:.2f})."
+                                f" This can be due to ramp time set on raster time. "
+                                f"Could be avoided with higher spoiling gradient. ")
                             log_module.warning(warn)
             t += duration_re_grad
         else:
@@ -711,7 +721,7 @@ class ADC(Event):
         return adc_instance
 
     def get_duration(self):
-        return self.t_duration_s + self.t_delay_s
+        return self.t_duration_s + self.t_delay_s + self.t_dead_time_s
 
     def to_simple_ns(self):
         return types.SimpleNamespace(
@@ -724,9 +734,22 @@ class ADC(Event):
         fig = plt.figure()
         ax = fig.add_subplot()
         amplitude = np.array([0, 0, 1, 1, 0])
-        times = np.array(
-            [0, self.t_delay_s - 1e-9, self.t_delay_s + 1e-9, self.get_duration() - 1e-9, self.get_duration() + 1e-9])
+        times = np.array([
+            0,
+            self.t_delay_s - 1e-9,
+            self.t_delay_s + 1e-9,
+            (self.t_duration_s + self.t_delay_s) - 1e-9,
+            (self.t_duration_s + self.t_delay_s) + 1e-9
+        ])
+        amp_dead_time = [0, 1, 1, 0]
+        t_dead_time = [
+            (self.t_duration_s + self.t_delay_s) - 1e-9,
+            (self.t_duration_s + self.t_delay_s) + 1e-9,
+            self.get_duration() - 1e-9,
+            self.get_duration() + 1e-9,
+        ]
         ax.plot(times * 1e3, amplitude)
+        ax.fill_between(amp_dead_time, t_dead_time)
         ax.set_xlabel("time [ms]")
         ax.set_ylabel("ADC")
         plt.show()

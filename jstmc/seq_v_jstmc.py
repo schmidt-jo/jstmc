@@ -20,10 +20,25 @@ class SeqJstmc(seq_baseclass.Sequence):
         self.delay_slice: events.DELAY = events.DELAY()
 
         # sbbs
+        self.block_acquisition: kernels.Kernel = kernels.Kernel.acquisition_fs(
+            pyp_params=self.params,
+            system=self.pp_sys
+        )
+        self.id_acq_se = "fs_acq"
+
+        self.block_refocus, self.phase_enc_time = kernels.Kernel.refocus_slice_sel_spoil(
+            pyp_interface=self.params,
+            system=self.pp_sys,
+            pulse_num=1,
+            return_pe_time=True,
+            read_gradient_to_prephase=self.block_acquisition.grad_read.area / 2
+        )
+
         self.block_refocus_1: kernels.Kernel = kernels.Kernel.refocus_slice_sel_spoil(
             pyp_interface=self.params,
             system=self.pp_sys,
-            pulse_num=0
+            pulse_num=0,
+            read_gradient_to_prephase=self.block_acquisition.grad_read.area / 2
         )
         # calculate ramp area to slice select upon refocusing 1
         ramp_area_ref_1 = np.trapz(
@@ -36,20 +51,6 @@ class SeqJstmc(seq_baseclass.Sequence):
             system=self.pp_sys,
             adjust_ramp_area=ramp_area_ref_1
         )
-
-        self.block_acquisition: kernels.Kernel = kernels.Kernel.acquisition_fs(
-            pyp_params=self.params,
-            system=self.pp_sys
-        )
-        self.id_acq_se = "fs_acq"
-
-        self.block_refocus, self.phase_enc_time = kernels.Kernel.refocus_slice_sel_spoil(
-            pyp_interface=self.params,
-            system=self.pp_sys,
-            pulse_num=1,
-            return_pe_time=True
-        )
-
         self.block_spoil_end: kernels.Kernel = kernels.Kernel.spoil_all_grads(
             pyp_interface=self.params,
             system=self.pp_sys
@@ -69,7 +70,8 @@ class SeqJstmc(seq_baseclass.Sequence):
             self.block_refocus_1.plot(path=self.interface.config.output_path, name="refocus_1")
             self.block_refocus.plot(path=self.interface.config.output_path, name="refocus")
             self.block_excitation_nav.plot(path=self.interface.config.output_path, name="nav_excitation")
-            for k in range(5):
+            self.block_acquisition.plot(path=self.interface.config.output_path, name="fs_acquisition")
+            for k in range(3):
                 self.block_list_fid_nav_acq[k].plot(path=self.interface.config.output_path, name=f"nav_acq_{k}")
 
         # register slice select pulse grad kernels
@@ -463,7 +465,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * z
         # we are setting the phase of a pulse here into its phase offset var.
         # To merge both: given phase parameter and any complex signal array data
-        sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.calculate_center()
+        sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.t_mid
 
 
 if __name__ == '__main__':
