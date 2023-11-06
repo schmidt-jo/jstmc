@@ -82,6 +82,13 @@ class Sequence(abc.ABC):
             log_module.info(f"loading {msg[l_idx]}: {l_file.as_posix()}")
             # set attributes
             pypsi_params.__setattr__(att[l_idx], pypsi_params.__getattribute__(att[l_idx]).load(l_file))
+            if l_idx == 0:
+                # post stats
+                log_module.info(f"Bandwidth: {pypsi_params.pypulseq.bandwidth:.3f} Hz/px; "
+                                f"Readout time: {pypsi_params.pypulseq.acquisition_time * 1e3:.1f} ms; "
+                                f"DwellTime: {pypsi_params.pypulseq.dwell * 1e6:.1f} us; "
+                                f"Number of Freq Encodes: {pypsi_params.pypulseq.resolution_n_read}")
+                _ = pypsi_params.pypulseq.get_voxel_size(write_log=True)
 
         if args.o:
             # set output path
@@ -316,35 +323,23 @@ class Sequence(abc.ABC):
     # emc
     def _set_emc_parameters(self):
         log_module.debug(f"set pypsi emc")
-        self.interface.emc.gamma_hz = self.interface.specs.gamma
-        self.interface.emc.gamma_pi = self.interface.specs.gamma / 2 / np.pi
-        self.interface.emc.etl = self.params.etl
-        self.interface.emc.esp = self.params.esp
-        self.interface.emc.bw = self.params.bandwidth
-        # self.interface.emc.gradMode = "Normal"
-        self.interface.emc.excitationAngle = self.params.excitation_rf_rad_fa / np.pi * 180.0
-        self.interface.emc.excitationPhase = self.params.excitation_rf_phase
-        self.interface.emc.gradientExcitation = self._set_grad_for_emc(
-            self.block_excitation.grad_slice.slice_select_amplitude
+        # spawn emc obj with relevant information - to make use of postinit
+        self.interface.emc = pypsi.parameters.EmcParameters(
+            gamma_hz=self.interface.specs.gamma,
+            etl=self.params.etl,
+            esp = self.params.esp,
+            bw = self.params.bandwidth,
+            excitation_angle=self.params.excitation_rf_fa,
+            excitation_phase=self.params.excitation_rf_phase,
+            gradient_excitation=self._set_grad_for_emc(self.block_excitation.grad_slice.slice_select_amplitude),
+            duration_excitation=self.params.excitation_duration,
+            refocus_angle=self.params.refocusing_rf_fa,
+            refocus_phase=self.params.refocusing_rf_phase,
+            gradient_refocus=self._set_grad_for_emc(self.block_refocus.grad_slice.slice_select_amplitude),
+            duration_refocus=self.params.refocusing_duration,
+            gradient_crush=self._set_grad_for_emc(self.block_refocus.grad_slice.amplitude[1]),
+            duration_crush=np.sum(np.diff(self.block_refocus.grad_slice.t_array_s[-4:])) * 1e6
         )
-        self.interface.emc.durationExcitation = self.params.excitation_duration
-        self.interface.emc.gradientExcitationVerse1 = 0.0
-        self.interface.emc.gradientExcitationVerse2 = 0.0
-        self.interface.emc.durationExcitationVerse1 = 0.0
-        self.interface.emc.durationExcitationVerse2 = 0.0
-        self.interface.emc.refocusAngle = self.params.refocusing_rf_fa
-        self.interface.emc.refocusPhase = self.params.refocusing_rf_phase
-        self.interface.emc.gradientRefocus = self._set_grad_for_emc(
-            self.block_refocus.grad_slice.slice_select_amplitude
-        )
-        self.interface.emc.durationRefocus = self.params.refocusing_duration
-        self.interface.emc.gradientCrush = self._set_grad_for_emc(self.block_refocus.grad_slice.amplitude[1])
-        self.interface.emc.durationCrush = np.sum(np.diff(self.block_refocus.grad_slice.t_array_s[-4:])) * 1e6
-        self.interface.emc.gradientRefocusVerse1 = 0.0
-        self.interface.emc.gradientRefocusVerse2 = 0.0
-        self.interface.emc.durationRefocusVerse1 = 0.0
-        self.interface.emc.durationRefocusVerse2 = 0.0
-
         self._fill_emc_info()
 
     @abc.abstractmethod

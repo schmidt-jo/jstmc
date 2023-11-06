@@ -140,8 +140,8 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         t_rephase = (self.block_excitation.get_duration() -
                      (self.block_excitation.rf.t_duration_s + self.block_excitation.rf.t_delay_s))
         amp_rephase = self.block_excitation.grad_slice.area[-1] / t_rephase
-        self.interface.emc.gradientExcitationRephase = self._set_grad_for_emc(amp_rephase)
-        self.interface.emc.durationExcitationRephase = t_rephase * 1e6
+        self.interface.emc.gradient_excitation_rephase = self._set_grad_for_emc(amp_rephase)
+        self.interface.emc.duration_excitation_rephase = t_rephase * 1e6
 
     def _mod_spoiling_end(self):
         # want to enable complete refocusing of read gradient when spoiling factor -0.5 is chosen in opts
