@@ -7,7 +7,6 @@ import pandas as pd
 import pathlib as plib
 import pypulseq as pp
 import numpy as np
-import itertools as it
 log_module = logging.getLogger(__name__)
 
 
@@ -174,7 +173,7 @@ def plot_seq(seq: pp.Sequence, out_path: typing.Union[plib.Path, str], name: str
     )
     tmp_df = df[df["labels"] == "RF phase"]
     fig.add_trace(
-        go.Scattergl(x=tmp_df["time"], y=tmp_df["data"], name="RF Phase [rad]", opacity=0.4),
+        go.Scattergl(x=tmp_df["time"], y=tmp_df["data"], name="RF Phase [rad]", opacity=0.3),
         1, 1, secondary_y=False
     )
     # axes properties

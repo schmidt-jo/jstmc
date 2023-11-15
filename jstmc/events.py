@@ -62,7 +62,7 @@ class RF(Event):
                               duration_s: float = 2e-3, delay_s: float = 0.0, pulse_type: str = 'excitation'):
         rf_instance = cls()
         rf_instance.system = system
-        rf = pypsi.Params.pulse.load(fname)
+        rf = pypsi.parameters.rf_params.RFPulse.load(fname)
         rf_instance.extRfFile = fname
         rf_instance.pulse_type = pulse_type
 

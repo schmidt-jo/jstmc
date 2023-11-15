@@ -327,8 +327,8 @@ class Sequence(abc.ABC):
         self.interface.emc = pypsi.parameters.EmcParameters(
             gamma_hz=self.interface.specs.gamma,
             etl=self.params.etl,
-            esp = self.params.esp,
-            bw = self.params.bandwidth,
+            esp=self.params.esp,
+            bw=self.params.bandwidth,
             excitation_angle=self.params.excitation_rf_fa,
             excitation_phase=self.params.excitation_rf_phase,
             gradient_excitation=self._set_grad_for_emc(self.block_excitation.grad_slice.slice_select_amplitude),
@@ -338,7 +338,8 @@ class Sequence(abc.ABC):
             gradient_refocus=self._set_grad_for_emc(self.block_refocus.grad_slice.slice_select_amplitude),
             duration_refocus=self.params.refocusing_duration,
             gradient_crush=self._set_grad_for_emc(self.block_refocus.grad_slice.amplitude[1]),
-            duration_crush=np.sum(np.diff(self.block_refocus.grad_slice.t_array_s[-4:])) * 1e6
+            duration_crush=np.sum(np.diff(self.block_refocus.grad_slice.t_array_s[-4:])) * 1e6,
+            tes=self.te
         )
         self._fill_emc_info()
 
@@ -351,14 +352,22 @@ class Sequence(abc.ABC):
     # pulse
     def _set_pulse_info(self):
         log_module.debug(f"set pypsi pulse")
-        self.interface.pulse.bandwidth_in_Hz = self.block_excitation.rf.bandwidth_hz
-        self.interface.pulse.duration_in_us = self.block_excitation.rf.t_duration_s * 1e6
-        self.interface.pulse.time_bandwidth = self.block_excitation.rf.t_duration_s * \
-                                              self.block_excitation.rf.bandwidth_hz
-        self.interface.pulse.num_samples = self.block_excitation.rf.signal.shape[0]
-
-        self.interface.pulse.amplitude = np.abs(self.block_excitation.rf.signal)
-        self.interface.pulse.phase = np.angle(self.block_excitation.rf.signal)
+        blocks = [self.block_excitation, self.block_refocus]
+        attributes = ["excitation", "refocusing"]
+        for k in range(len(blocks)):
+            block = blocks[k]
+            attri = attributes[k]
+            self.interface.pulse.__setattr__(
+                attri,
+                pypsi.parameters.rf_params.RFPulse(
+                    name=attri, bandwidth_in_Hz=block.rf.bandwidth_hz,
+                    duration_in_us=block.rf.t_duration_s * 1e6,
+                    time_bandwidth=block.rf.t_duration_s * block.rf.bandwidth_hz,
+                    num_samples=block.rf.signal.shape[0],
+                    amplitude=np.abs(block.rf.signal),
+                    phase=np.angle(block.rf.signal)
+                )
+            )
 
     # inits
     def _set_pp_sys_from_pypsi(self) -> pp.Opts:

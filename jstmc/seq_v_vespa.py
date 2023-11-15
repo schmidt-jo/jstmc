@@ -275,7 +275,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # 2) between first ref and se
         te_1 = 2 * np.max([t_exci_0e + t_0e_1ref, t_ref1_gre1 + t_gre1_se1])
 
-        # time to either side between exxcitation - ref - se needs to be equal, calculate appropriate delays
+        # time to either side between excitation - ref - se needs to be equal, calculate appropriate delays
         if t_exci_0e + t_0e_1ref < te_1 / 2:
             self.t_delay_e0_ref1 = events.DELAY.make_delay(te_1 / 2 - t_exci_0e - t_0e_1ref, system=self.pp_sys)
         if t_ref1_gre1 + t_gre1_se1 < te_1 / 2:
@@ -284,7 +284,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # write echo times to array
         self.te.append(t_exci_0e)
         self.te.append(t_exci_0e + t_0e_1ref + self.t_delay_e0_ref1.get_duration() + \
-                     self.t_delay_ref1_se1.get_duration() + t_ref1_gre1)
+                       self.t_delay_ref1_se1.get_duration() + t_ref1_gre1)
         self.te.append(te_1)
         self.te.append(te_1 + t_gre1_se1)
         for k in np.arange(4, self.params.etl * 3 + 1, 3):
@@ -294,8 +294,10 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             self.te.append(self.te[k] + t_gre1_se1)
             # and same amount again to arrive at gre sampling
             self.te.append(self.te[k + 1] + t_gre1_se1)
-        te_print = [f'{1000*t:.2f}' for t in self.te]
+        te_print = [f'{1000 * t:.2f}' for t in self.te]
         log_module.info(f"echo times: {te_print} ms")
+        # deliberately set esp weird to catch it upon processing when dealing with vespa/megesse style sequence
+        self.esp = -1
 
     def _set_fa(self, rf_idx: int):
         # we take same kernels for different refocusing pulses when going through the sequence
@@ -375,7 +377,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                         slice_num=self.trueSliceNum[idx_slice_loop],
                                                                         pe_num=int(self.k_pe_indexes[
-                                                                            phase_encode_echo, idx_pe_loop]),
+                                                                                       phase_encode_echo, idx_pe_loop]),
                                                                         echo_num=echo_gre_idx + echo_se_idx,
                                                                         acq_type=self.id_gre_acq, echo_type="gre",
                                                                         echo_type_num=echo_gre_idx)
@@ -387,7 +389,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             scan_idx, echo_se_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                        slice_num=self.trueSliceNum[idx_slice_loop],
                                                                        pe_num=int(self.k_pe_indexes[
-                                                                           phase_encode_echo, idx_pe_loop]),
+                                                                                      phase_encode_echo, idx_pe_loop]),
                                                                        echo_num=echo_gre_idx + echo_se_idx,
                                                                        acq_type=self.id_se_acq, echo_type="se",
                                                                        echo_type_num=echo_se_idx)
@@ -399,7 +401,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
                                                                         slice_num=self.trueSliceNum[idx_slice_loop],
                                                                         pe_num=int(self.k_pe_indexes[
-                                                                            phase_encode_echo, idx_pe_loop]),
+                                                                                       phase_encode_echo, idx_pe_loop]),
                                                                         echo_num=echo_gre_idx + echo_se_idx,
                                                                         acq_type=self.id_gre_acq, echo_type="gre",
                                                                         echo_type_num=echo_gre_idx)
