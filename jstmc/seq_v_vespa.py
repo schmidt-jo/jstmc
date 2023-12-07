@@ -356,7 +356,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             block.grad_phase.amplitude = np.zeros_like(block.grad_phase.amplitude)
 
     def _add_gesse_readouts(self, idx_pe_loop: int, idx_slice_loop: int,
-                            scan_idx: int, echo_se_idx: int, echo_gre_idx: int, no_adc: bool = False):
+                            echo_se_idx: int, echo_gre_idx: int, no_adc: bool = False):
 
         if no_adc:
             # gre readout
@@ -374,40 +374,40 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         self.pp_seq.add_block(*aq_block_gre.list_events_to_ns())
         if not no_adc:
             # write sampling pattern
-            scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                        slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                        pe_num=int(self.k_pe_indexes[
-                                                                                       phase_encode_echo, idx_pe_loop]),
-                                                                        echo_num=echo_gre_idx + echo_se_idx,
-                                                                        acq_type=self.id_gre_acq, echo_type="gre",
-                                                                        echo_type_num=echo_gre_idx)
+            echo_gre_idx = self._write_sampling_pattern_entry(
+                slice_num=self.trueSliceNum[idx_slice_loop],
+                pe_num=int(self.k_pe_indexes[phase_encode_echo, idx_pe_loop]),
+                echo_num=echo_gre_idx + echo_se_idx,
+                acq_type=self.id_gre_acq, echo_type="gre",
+                echo_type_num=echo_gre_idx
+            )
 
         # add se sampling
         self.pp_seq.add_block(*aq_block_se.list_events_to_ns())
         if not no_adc:
             # write sampling pattern
-            scan_idx, echo_se_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                       slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                       pe_num=int(self.k_pe_indexes[
-                                                                                      phase_encode_echo, idx_pe_loop]),
-                                                                       echo_num=echo_gre_idx + echo_se_idx,
-                                                                       acq_type=self.id_se_acq, echo_type="se",
-                                                                       echo_type_num=echo_se_idx)
+            echo_se_idx = self._write_sampling_pattern_entry(
+                slice_num=self.trueSliceNum[idx_slice_loop],
+                pe_num=int(self.k_pe_indexes[phase_encode_echo, idx_pe_loop]),
+                echo_num=echo_gre_idx + echo_se_idx,
+                acq_type=self.id_se_acq, echo_type="se",
+                echo_type_num=echo_se_idx
+            )
 
         # add gre sampling
         self.pp_seq.add_block(*aq_block_gre.list_events_to_ns())
         if not no_adc:
             # write sampling pattern
-            scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                        slice_num=self.trueSliceNum[idx_slice_loop],
-                                                                        pe_num=int(self.k_pe_indexes[
-                                                                                       phase_encode_echo, idx_pe_loop]),
-                                                                        echo_num=echo_gre_idx + echo_se_idx,
-                                                                        acq_type=self.id_gre_acq, echo_type="gre",
-                                                                        echo_type_num=echo_gre_idx)
-        return scan_idx, echo_se_idx, echo_gre_idx
+            echo_gre_idx = self._write_sampling_pattern_entry(
+                slice_num=self.trueSliceNum[idx_slice_loop],
+                pe_num=int(self.k_pe_indexes[phase_encode_echo, idx_pe_loop]),
+                echo_num=echo_gre_idx + echo_se_idx,
+                acq_type=self.id_gre_acq, echo_type="gre",
+                echo_type_num=echo_gre_idx
+            )
+        return echo_se_idx, echo_gre_idx
 
-    def _loop_slices(self, idx_pe_n: int, scan_idx: int, no_adc: bool = False):
+    def _loop_slices(self, idx_pe_n: int, no_adc: bool = False):
         # adc
         if no_adc:
             # partial fourier readout
@@ -431,12 +431,13 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             self.pp_seq.add_block(*aq_block_pf.list_events_to_ns())
             if not no_adc:
                 # write sampling pattern
-                scan_idx, echo_gre_idx = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                            slice_num=self.trueSliceNum[idx_slice],
-                                                                            pe_num=int(self.k_pe_indexes[0, idx_pe_n]),
-                                                                            echo_num=echo_gre_idx + echo_se_idx,
-                                                                            acq_type=self.id_pf_acq, echo_type="gre",
-                                                                            echo_type_num=echo_gre_idx)
+                echo_gre_idx = self._write_sampling_pattern_entry(
+                    slice_num=self.trueSliceNum[idx_slice],
+                    pe_num=int(self.k_pe_indexes[0, idx_pe_n]),
+                    echo_num=echo_gre_idx + echo_se_idx,
+                    acq_type=self.id_pf_acq, echo_type="gre",
+                    echo_type_num=echo_gre_idx
+                )
             # delay if necessary
             if self.t_delay_e0_ref1.get_duration() > 1e-7:
                 self.pp_seq.add_block(self.t_delay_e0_ref1.to_simple_ns())
@@ -453,10 +454,11 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             if self.t_delay_ref1_se1.get_duration() > 1e-7:
                 self.pp_seq.add_block(self.t_delay_ref1_se1.to_simple_ns())
 
-            scan_idx, echo_se_idx, echo_gre_idx = self._add_gesse_readouts(
+            echo_se_idx, echo_gre_idx = self._add_gesse_readouts(
                 idx_pe_loop=idx_pe_n, idx_slice_loop=idx_slice,
-                scan_idx=scan_idx, echo_se_idx=echo_se_idx, echo_gre_idx=echo_gre_idx,
-                no_adc=no_adc)
+                echo_se_idx=echo_se_idx, echo_gre_idx=echo_gre_idx,
+                no_adc=no_adc
+            )
 
             # successive double gre + mese in center
             for echo_idx in np.arange(1, self.params.etl):
@@ -467,9 +469,9 @@ class SeqVespaGerd(seq_baseclass.Sequence):
                 # refocus
                 self.pp_seq.add_block(*self.block_refocus.list_events_to_ns())
 
-                scan_idx, echo_se_idx, echo_gre_idx = self._add_gesse_readouts(
+                echo_se_idx, echo_gre_idx = self._add_gesse_readouts(
                     idx_pe_loop=idx_pe_n, idx_slice_loop=idx_slice,
-                    scan_idx=scan_idx, echo_se_idx=echo_se_idx, echo_gre_idx=echo_gre_idx,
+                    echo_se_idx=echo_se_idx, echo_gre_idx=echo_gre_idx,
                     no_adc=no_adc
                 )
 
@@ -479,7 +481,6 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             self.pp_seq.add_block(*self.block_spoil_end.list_events_to_ns())
             # set slice delay
             self.pp_seq.add_block(self.delay_slice.to_simple_ns())
-        return scan_idx
 
     def _loop_lines(self):
         # through phase encodes
@@ -487,10 +488,9 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             self.params.number_central_lines + self.params.number_outer_lines, desc="phase encodes"
         )
         # one loop for introduction and settling in, no adcs
-        _ = self._loop_slices(idx_pe_n=0, scan_idx=0, no_adc=True)
-        scan_idx = 0
+        _ = self._loop_slices(idx_pe_n=0, no_adc=True)
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
-            scan_idx = self._loop_slices(idx_pe_n=idx_n, scan_idx=scan_idx)
+            self._loop_slices(idx_pe_n=idx_n)
 
     def _set_end_spoil_phase_grad(self):
         factor = np.array([0.5, 1.0, 0.5])

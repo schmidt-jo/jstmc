@@ -51,6 +51,8 @@ def main():
         # pyp_seq.plot(time_range=(0, 4e-3 * jstmc_seq.params.tr), time_disp='s')
         plotting.plot_seq(pyp_seq, t_start_s=4, t_end_s=6, out_path=outpath, name="seq_2s_start-at-4",
                           sim_grad_moments=True)
+        plotting.plot_seq(pyp_seq, t_start_s=0, t_end_s=2, out_path=outpath, name="seq_2s_start-at-0",
+                          sim_grad_moments=True)
         jstmc_seq.interface.visualize()
 
 

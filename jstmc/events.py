@@ -775,10 +775,10 @@ class DELAY(Event):
         self.system = pp.Opts()
 
     @classmethod
-    def make_delay(cls, delay: float, system: pp.Opts = pp.Opts()):
+    def make_delay(cls, delay_s: float, system: pp.Opts = pp.Opts()):
         delay_instance = cls()
         delay_instance.system = system
-        delay_instance.t_duration_s = delay
+        delay_instance.t_duration_s = delay_s
         delay_instance.set_on_block_raster()
         return delay_instance
 

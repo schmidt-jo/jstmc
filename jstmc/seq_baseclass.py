@@ -1,5 +1,5 @@
 import pandas as pd
-from jstmc import options, kernels, plotting
+from jstmc import options, kernels, plotting, events
 import numpy as np
 import logging
 import pypulseq as pp
@@ -55,6 +55,9 @@ class Sequence(abc.ABC):
         self.sampling_pattern_set: bool = False
         self.k_trajectory_set: bool = False
         self.recon_params: bool = False
+
+        # count adcs to track adcs for recon
+        self.scan_idx: int = 0
 
     # __ public __
     # create
@@ -227,6 +230,8 @@ class Sequence(abc.ABC):
         log_module.info(f"build variant specifics")
         self._build_variant()
         log_module.info(f"build -- loop lines")
+        # prescan for noise correlation
+        self._noise_pre_scan()
         self._loop_lines()
         log_module.info(f"set pypsi interface")
         # sampling + k traj
@@ -251,6 +256,32 @@ class Sequence(abc.ABC):
         # to be implemented for each variant, looping through the phase encodes
         pass
 
+    def _noise_pre_scan(self):
+        # make delay
+        post_delay = events.DELAY.make_delay(delay_s=0.1, system=self.pp_sys)
+        # build adc block
+        acq = kernels.Kernel.acquisition_fs(pyp_params=self.params, system=self.pp_sys)
+        # set grad 0
+        acq.grad_read = events.GRAD()
+        # reset delay
+        acq.adc.t_delay_s = 0.0
+        # get duration
+        dur = acq.get_duration()
+        # add delay to get onto the grad raster
+        raster_time = self.pp_sys.grad_raster_time
+        block_duration = int(np.ceil(dur / raster_time))
+        pre_delay = block_duration * raster_time - dur
+        acq.adc.t_delay_s = pre_delay
+        # use 2 noise scans
+        for k in range(2):
+            # add to sequence
+            self.pp_seq.add_block(*acq.list_events_to_ns())
+            # write as sampling entry
+            self._write_sampling_pattern_entry(
+                slice_num=0, pe_num=0, echo_num=k, echo_type="noise_scan", acq_type="noise_scan"
+            )
+            self.pp_seq.add_block(post_delay.to_simple_ns())
+
     # caution: this is closely tied to the pypsi module and changes in either might affect the other!
     def _check_interface_set(self):
         if any([not state for state in [self.k_trajectory_set, self.recon_params_set, self.sampling_pattern_set]]):
@@ -266,18 +297,19 @@ class Sequence(abc.ABC):
                 log_module.warning(warn)
 
     # sampling & k - space
-    def _write_sampling_pattern_entry(self, scan_num: int, slice_num: int, pe_num: int, echo_num: int,
+    def _write_sampling_pattern_entry(self, slice_num: int, pe_num: int, echo_num: int,
                                       acq_type: str = "", echo_type: str = "", echo_type_num: int = -1,
                                       nav_acq: bool = False):
         log_module.debug(f"set pypsi sampling pattern")
         self.sampling_pattern_set = True
         # save to list
         self._sampling_pattern_constr.append({
-            "scan_num": scan_num, "slice_num": slice_num, "pe_num": pe_num, "acq_type": acq_type,
+            "scan_num": self.scan_idx, "slice_num": slice_num, "pe_num": pe_num, "acq_type": acq_type,
             "echo_num": echo_num, "echo_type": echo_type, "echo_type_num": echo_type_num,
             "nav_acq": nav_acq
         })
-        return scan_num + 1, echo_type_num + 1
+        self.scan_idx += 1
+        return echo_type_num + 1
 
     def _write_sampling_pattern(self):
         self.interface.sampling_k_traj.sampling_pattern_from_list(sp_list=self._sampling_pattern_constr)

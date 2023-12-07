@@ -274,7 +274,8 @@ class Kernel:
             return _instance
 
     @classmethod
-    def acquisition_fs(cls, pyp_params: pypsi.Params.pypulseq, system: pp.Opts, invert_grad_read_dir: bool = False):
+    def acquisition_fs(cls, pyp_params: pypsi.Params.pypulseq, system: pp.Opts,
+                       invert_grad_read_dir: bool = False):
         # block : adc + read grad
         log_module.info("setup acquisition")
         adc = events.ADC.make_adc(

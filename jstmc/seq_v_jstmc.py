@@ -166,7 +166,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         # add spoiling
         block_fid_nav.append(self.block_spoil_end)
         # add delay
-        block_fid_nav.append(kernels.Kernel(system=self.pp_sys, delay=events.DELAY.make_delay(delay=10e-3)))
+        block_fid_nav.append(kernels.Kernel(system=self.pp_sys, delay=events.DELAY.make_delay(delay_s=10e-3)))
         return block_fid_nav
 
     def _set_excitation_fid_nav(self) -> kernels.Kernel:
@@ -262,7 +262,7 @@ class SeqJstmc(seq_baseclass.Sequence):
         log_module.info(f"build -- calculate slice delay")
         self._calculate_slice_delay()
 
-    def _loop_slices(self, idx_pe_n: int, scan_idx: int, no_adc: bool = False):
+    def _loop_slices(self, idx_pe_n: int, no_adc: bool = False):
         # adc
         if no_adc:
             aq_block = self.block_acquisition.copy()
@@ -297,10 +297,11 @@ class SeqJstmc(seq_baseclass.Sequence):
             self.pp_seq.add_block(*aq_block.list_events_to_ns())
             if not no_adc:
                 # write sampling pattern
-                scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                 slice_num=self.trueSliceNum[idx_slice],
-                                                                 pe_num=int(self.k_pe_indexes[0, idx_pe_n]), echo_num=0,
-                                                                 acq_type=self.id_acq_se)
+                _ = self._write_sampling_pattern_entry(
+                    slice_num=self.trueSliceNum[idx_slice],
+                    pe_num=int(self.k_pe_indexes[0, idx_pe_n]), echo_num=0,
+                    acq_type=self.id_acq_se
+                )
 
             # delay if necessary
             if self.delay_ref_adc.get_duration() > 1e-7:
@@ -322,10 +323,11 @@ class SeqJstmc(seq_baseclass.Sequence):
                 self.pp_seq.add_block(*aq_block.list_events_to_ns())
                 if not no_adc:
                     # write sampling pattern
-                    scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx,
-                                                                     slice_num=self.trueSliceNum[idx_slice],
-                                                                     pe_num=int(self.k_pe_indexes[echo_idx, idx_pe_n]),
-                                                                     echo_num=echo_idx, acq_type=self.id_acq_se)
+                    _ = self._write_sampling_pattern_entry(
+                        slice_num=self.trueSliceNum[idx_slice],
+                        pe_num=int(self.k_pe_indexes[echo_idx, idx_pe_n]),
+                        echo_num=echo_idx, acq_type=self.id_acq_se
+                    )
 
                 # delay if necessary
                 if self.delay_ref_adc.get_duration() > 1e-7:
@@ -335,9 +337,8 @@ class SeqJstmc(seq_baseclass.Sequence):
             self.pp_seq.add_block(*self.block_spoil_end.list_events_to_ns())
             # insert slice delay
             self.pp_seq.add_block(self.delay_slice.to_simple_ns())
-        return scan_idx
 
-    def _loop_navs(self, scan_idx: int):
+    def _loop_navs(self):
         # navigators
         for nav_idx in range(self.nav_num):
             self._apply_slice_offset_fid_nav(idx_nav=nav_idx)
@@ -370,12 +371,12 @@ class SeqJstmc(seq_baseclass.Sequence):
                 if b.adc.get_duration() > 0:
                     # track which line we are writing from the incremental steps
                     nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
-                    scan_idx, _ = self._write_sampling_pattern_entry(scan_num=scan_idx, slice_num=nav_idx,
-                                                                     pe_num=nav_line_pe, echo_num=0,
-                                                                     acq_type=f"{self.id_acq_nav}_{nav_ident}",
-                                                                     echo_type="gre-fid", nav_acq=True)
+                    _ = self._write_sampling_pattern_entry(
+                        slice_num=nav_idx, pe_num=nav_line_pe, echo_num=0,
+                        acq_type=f"{self.id_acq_nav}_{nav_ident}",
+                        echo_type="gre-fid", nav_acq=True
+                    )
                     line_counter += 1
-        return scan_idx
 
     def _loop_lines(self):
         # through phase encodes
@@ -383,12 +384,11 @@ class SeqJstmc(seq_baseclass.Sequence):
             self.params.number_central_lines + self.params.number_outer_lines, desc="phase encodes"
         )
         # one slice loop for introduction
-        _ = self._loop_slices(idx_pe_n=0, scan_idx=0, no_adc=True)
+        _ = self._loop_slices(idx_pe_n=0, no_adc=True)
         # counter for number of scan
-        scan_idx = 0
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
-            scan_idx = self._loop_slices(idx_pe_n=idx_n, scan_idx=scan_idx)
-            scan_idx = self._loop_navs(scan_idx=scan_idx)
+            self._loop_slices(idx_pe_n=idx_n)
+            self._loop_navs()
 
         log_module.info(f"sequence built!")
 
