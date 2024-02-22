@@ -651,7 +651,7 @@ class Kernel:
         )
         return cls(system=system, grad_slice=grad_slice, grad_phase=grad_phase, grad_read=grad_read_spoil)
 
-    def plot(self, path: typing.Union[str, plib.Path], name=""):
+    def plot(self, path: typing.Union[str, plib.Path], name: str = "", file_suffix: str = "png"):
         # build dataframe
         # columns - index, facet, ampl_1, ampl_2, ampl_3, time
         # plot rf abs(1) phase(2) + or adc on one facet, plot grads on one facet
@@ -791,9 +791,12 @@ class Kernel:
                              tickmode="array", tickvals=[0, 1, 2], ticktext=["Off", "On", ""])
             fig.update_yaxes(title_text="Gradient Amplitude [mT/m]", secondary_y=True)
             fig.update_xaxes(title_text="Time [\u00B5s]")
-
+        fig.update_layout(width=900, height=600)
         fig_path = plib.Path(path).absolute().joinpath("plots/")
         fig_path.mkdir(parents=True, exist_ok=True)
-        fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(".html")
+        fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(f".{file_suffix}")
         log_module.info(f"writing file: {fig_path.as_posix()}")
-        fig.write_html(fig_path.as_posix())
+        if file_suffix in ["png", "pdf"]:
+            fig.write_image(fig_path.as_posix())
+        else:
+            fig.write_html(fig_path.as_posix())

@@ -260,22 +260,11 @@ class Sequence(abc.ABC):
         # make delay
         post_delay = events.DELAY.make_delay(delay_s=0.1, system=self.pp_sys)
         # build adc block
-        acq = kernels.Kernel.acquisition_fs(pyp_params=self.params, system=self.pp_sys)
-        # set grad 0
-        acq.grad_read = events.GRAD()
-        # reset delay
-        acq.adc.t_delay_s = 0.0
-        # get duration
-        dur = acq.get_duration()
-        # add delay to get onto the grad raster
-        raster_time = self.pp_sys.grad_raster_time
-        block_duration = int(np.ceil(dur / raster_time))
-        pre_delay = block_duration * raster_time - dur
-        acq.adc.t_delay_s = pre_delay
+        acq = events.ADC.make_adc(system=self.pp_sys, num_samples=1000, dwell=self.params.dwell)
         # use 2 noise scans
         for k in range(2):
             # add to sequence
-            self.pp_seq.add_block(*acq.list_events_to_ns())
+            self.pp_seq.add_block(acq.to_simple_ns())
             # write as sampling entry
             self._write_sampling_pattern_entry(
                 slice_num=0, pe_num=0, echo_num=k, echo_type="noise_scan", acq_type="noise_scan"
@@ -444,22 +433,32 @@ class Sequence(abc.ABC):
             weighting_factor = np.clip(self.params.sample_weighting, 0.01, 1)
             if weighting_factor > 0.05:
                 log_module.info(f"\t\t-weighted random sampling of k-space phase encodes, factor: {weighting_factor}")
-            # random encodes for different echoes - random choice weighted towards center
-            weighting = np.clip(np.power(np.linspace(0, 1, k_start), weighting_factor), 1e-5, 1)
-            weighting /= np.sum(weighting)
-            for idx_echo in range(self.params.etl):
+                # random encodes for different echoes - random choice weighted towards center
+                weighting = np.clip(np.power(np.linspace(0, 1, k_start), weighting_factor), 1e-5, 1)
+                weighting /= np.sum(weighting)
+                for idx_echo in range(self.params.etl):
+                    # same encode for all echoes -> central lines
+                    self.k_pe_indexes[idx_echo, :self.params.number_central_lines] = np.arange(k_start, k_end)
+
+                    k_indices = self.prng.choice(
+                        k_remaining,
+                        size=self.params.number_outer_lines,
+                        replace=False,
+                        p=weighting
+
+                    )
+                    k_indices[::2] = self.params.resolution_n_phase - 1 - k_indices[::2]
+                    self.k_pe_indexes[idx_echo, self.params.number_central_lines:] = np.sort(k_indices)
+            else:
+                log_module.info(f"\t\t-grappa style alternating k-space phase encodes")
                 # same encode for all echoes -> central lines
-                self.k_pe_indexes[idx_echo, :self.params.number_central_lines] = np.arange(k_start, k_end)
+                self.k_pe_indexes[:, :self.params.number_central_lines] = np.arange(k_start, k_end)[None]
+                # pick every nth pe
+                k_indices = np.arange(0, self.params.resolution_n_phase, int(self.params.acceleration_factor))
+                # drop the central ones
+                k_indices = k_indices[(k_indices < k_start) | (k_indices > k_end)]
+                self.k_pe_indexes[:, self.params.number_central_lines:] = np.sort(k_indices)[None]
 
-                k_indices = self.prng.choice(
-                    k_remaining,
-                    size=self.params.number_outer_lines,
-                    replace=False,
-                    p=weighting
-
-                )
-                k_indices[::2] = self.params.resolution_n_phase - 1 - k_indices[::2]
-                self.k_pe_indexes[idx_echo, self.params.number_central_lines:] = np.sort(k_indices)
         else:
             self.k_pe_indexes[:, :] = np.arange(
                 self.params.number_central_lines + self.params.number_outer_lines

@@ -16,24 +16,30 @@ def create_fig_dir_ensure_exists(path: plib.Path):
     return fig_path
 
 
-def plot_grad_moms(mom_df: pd.DataFrame, out_path: typing.Union[plib.Path, str], name: str):
+def plot_grad_moms(mom_df: pd.DataFrame, out_path: typing.Union[plib.Path, str], name: str, file_suffix: str = "png"):
     fig = px.line(mom_df, x="id", y="moments", color="axis")
     fig_path = create_fig_dir_ensure_exists(out_path)
-    fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(".html")
+    fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(f".{file_suffix}")
     log_module.info(f"\t\t - writing file: {fig_path.as_posix()}")
-    fig.write_html(fig_path.as_posix())
+    if file_suffix in ["png", "pdf"]:
+        fig.write_image(fig_path.as_posix())
+    else:
+        fig.write_html(fig_path.as_posix())
 
 
-def plot_grad_moments(mom_df: pd.DataFrame, out_path: typing.Union[plib.Path, str], name: str):
+def plot_grad_moments(mom_df: pd.DataFrame, out_path: typing.Union[plib.Path, str], name: str, file_suffix: str = "html"):
     fig = px.scatter(mom_df, x="time", y="moments", color="id")
     fig_path = create_fig_dir_ensure_exists(out_path)
-    fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(".html")
+    fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(f".{file_suffix}")
     log_module.info(f"\t\t - writing file: {fig_path.as_posix()}")
-    fig.write_html(fig_path.as_posix())
+    if file_suffix in ["png", "pdf"]:
+        fig.write_image(fig_path.as_posix())
+    else:
+        fig.write_html(fig_path.as_posix())
 
 
 def plot_seq(seq: pp.Sequence, out_path: typing.Union[plib.Path, str], name: str,
-             t_start_s: float = 0.0, t_end_s: float = 10.0, sim_grad_moments: bool = False):
+             t_start_s: float = 0.0, t_end_s: float = 10.0, sim_grad_moments: bool = False, file_suffix: str = "html"):
     gamma = 42577478.518
     logging.debug(f"plot_seq")
     # transform to us
@@ -223,11 +229,17 @@ def plot_seq(seq: pp.Sequence, out_path: typing.Union[plib.Path, str], name: str
             )
         fig.update_yaxes(title_text="Gradient Moment [mT s/m]", range=[-1.2 * max_val, 1.2 * max_val], row=3, col=1,
                          secondary_y=False)
-
+    fig.update_layout(
+        width=1000,
+        height=800
+    )
     fig_path = create_fig_dir_ensure_exists(out_path)
-    fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(".html")
+    fig_path = fig_path.joinpath(f"plot_{name}").with_suffix(f".{file_suffix}")
     log_module.info(f"\t\t - writing file: {fig_path.as_posix()}")
-    fig.write_html(fig_path.as_posix())
+    if file_suffix in ["png", "pdf"]:
+        fig.write_image(fig_path.as_posix())
+    else:
+        fig.write_html(fig_path.as_posix())
 
 
 def simulate_grad_moments(df_rf_grads: pd.DataFrame):

@@ -20,6 +20,7 @@ class Config:
 
     d: bool = sp.field(default=False, help="Debug on/off")
     t: str = sp.field(default="vespa", choices=["vespa", "mese_fidnav"], help="Sequence Type")
+    p: str = sp.field(default="png", choice=["png", "pdf", "html"], help="Plot file endings")
 
 
 def create_cli() -> Config:
