@@ -106,7 +106,7 @@ def plot_seq(seq: pp.Sequence, out_path: typing.Union[plib.Path, str], name: str
             if sim_grad_moments:
                 flip_angle = 2 * np.pi * np.trapz(x=rf.t, y=np.abs(signal))
                 identifier = 0
-                if np.pi / 3 < flip_angle < 2 * np.pi / 3:
+                if np.pi / 4 < flip_angle < 2 * np.pi / 3:
                     identifier = 1
                 if 2 * np.pi / 3 < flip_angle < 4 * np.pi / 3:
                     identifier = 2
@@ -295,10 +295,16 @@ def simulate_grad_moments(df_rf_grads: pd.DataFrame):
                     if data == 1:
                         # grad mom null
                         grad_moments[label]["moment"].append(0.0)
-                    if data == 2:
+                    elif data == 2:
                         # grad mom flip
                         grad_moments[label]["moment"].append(-grad_moments[label]["moment"][-1])
-
+                    elif data == 0:
+                        # just use last gradient
+                        grad_moments[label]["moment"].append(grad_moments[label]["moment"][-1])
+                    else:
+                        err = f"unable to handle rf gradient moment effect for set data value: {data}"
+                        log_module.error(err)
+                        raise ValueError(err)
     # build dataframe
     times = []
     moments = []

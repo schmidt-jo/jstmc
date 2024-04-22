@@ -271,7 +271,8 @@ class SeqJstmc(seq_baseclass.Sequence):
             aq_block = self.block_acquisition
         for idx_slice in np.arange(-1, self.params.resolution_slice_num):
             # one loop as intro (-1)
-            self._set_fa(echo_idx=0)
+            self._set_fa(echo_idx=0, slice_idx=idx_slice, excitation=True)
+            self._set_fa(echo_idx=0, slice_idx=idx_slice)
             # looping through slices per phase encode
             self._set_phase_grad(phase_idx=idx_pe_n, echo_idx=0)
             # apply slice offset
@@ -310,7 +311,7 @@ class SeqJstmc(seq_baseclass.Sequence):
             # loop
             for echo_idx in np.arange(1, self.params.etl):
                 # set fa
-                self._set_fa(echo_idx=echo_idx)
+                self._set_fa(echo_idx=echo_idx, slice_idx=idx_slice)
                 # set phase
                 self._set_phase_grad(echo_idx=echo_idx, phase_idx=idx_pe_n)
                 # add block
@@ -392,15 +393,21 @@ class SeqJstmc(seq_baseclass.Sequence):
 
         log_module.info(f"sequence built!")
 
-    def _set_fa(self, echo_idx: int):
-        if echo_idx == 0:
-            sbb = self.block_refocus_1
+    def _set_fa(self, echo_idx: int, slice_idx: int, excitation: bool = False):
+        if excitation:
+            sbb = self.block_excitation
+            fa_rad = self.params.excitation_rf_rad_fa
+            phase_rad = self.params.excitation_rf_rad_phase
         else:
-            sbb = self.block_refocus
+            if echo_idx == 0:
+                sbb = self.block_refocus_1
+            else:
+                sbb = self.block_refocus
+            fa_rad = self.params.refocusing_rf_rad_fa[echo_idx]
+            phase_rad = self.params.refocusing_rf_rad_phase[echo_idx]
         flip = sbb.rf.t_duration_s / sbb.rf.signal.shape[0] * np.sum(np.abs(sbb.rf.signal)) * 2 * np.pi
-        fa_rad = self.params.refocusing_rf_rad_fa[echo_idx]
-        phase_rad = self.params.refocusing_rf_rad_phase[echo_idx]
-        sbb.rf.signal *= fa_rad / flip
+        # slice adaptive fa scaling
+        sbb.rf.signal *= fa_rad / flip * self.rf_slice_adaptive_scaling[slice_idx]
         sbb.rf.phase_rad = phase_rad
 
     def _set_phase_grad(self, echo_idx: int, phase_idx: int):

@@ -299,7 +299,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         # deliberately set esp weird to catch it upon processing when dealing with vespa/megesse style sequence
         self.esp = -1
 
-    def _set_fa(self, rf_idx: int):
+    def _set_fa(self, rf_idx: int, slice_idx: int):
         # we take same kernels for different refocusing pulses when going through the sequence
         # want to adopt rf flip angle and phase based on given input parameters via options
         block = self._get_refocus_block_from_echo_idx(rf_idx=rf_idx)
@@ -309,8 +309,10 @@ class SeqVespaGerd(seq_baseclass.Sequence):
         fa_rad = self.params.refocusing_rf_rad_fa[rf_idx]
         # take phase as given in options
         phase_rad = self.params.refocusing_rf_rad_phase[rf_idx]
+        # slice dep rf scaling
+        rf_scaling = self.rf_slice_adaptive_scaling[slice_idx]
         # set block values
-        block.rf.signal *= fa_rad / flip
+        block.rf.signal *= fa_rad / flip * rf_scaling
         block.rf.phase_rad = phase_rad
 
     def _get_refocus_block_from_echo_idx(self, rf_idx: int) -> Kernel:
@@ -444,7 +446,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
 
             # -- first refocus --
             # set flip angle from param list
-            self._set_fa(rf_idx=0)
+            self._set_fa(rf_idx=0, slice_idx=idx_slice)
             # looping through slices per phase encode, set phase encode for ref 1
             self._set_phase_grad(phase_idx=idx_pe_n, echo_idx=0)
             # add block
@@ -463,7 +465,7 @@ class SeqVespaGerd(seq_baseclass.Sequence):
             # successive double gre + mese in center
             for echo_idx in np.arange(1, self.params.etl):
                 # set flip angle from param list
-                self._set_fa(rf_idx=echo_idx)
+                self._set_fa(rf_idx=echo_idx, slice_idx=idx_slice)
                 # looping through slices per phase encode, set phase encode for ref 1
                 self._set_phase_grad(phase_idx=idx_pe_n, echo_idx=echo_idx)
                 # refocus

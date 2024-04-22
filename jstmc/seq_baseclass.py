@@ -6,6 +6,7 @@ import pypulseq as pp
 import pypsi
 import pathlib as plib
 import abc
+import json
 
 log_module = logging.getLogger(__name__)
 
@@ -58,6 +59,21 @@ class Sequence(abc.ABC):
 
         # count adcs to track adcs for recon
         self.scan_idx: int = 0
+        self.rf_slice_adaptive_scaling: np.ndarray = np.ones(self.params.resolution_slice_num)
+
+        if self.params.rf_adapt_z:
+            # set slice adaptive fa scaling, we want to make up for suboptimal FA performance in inferior slices
+            # before adapting a ptx scheme we could just try to account for the overall RF intensity decrease
+            # by adaptively scaling the RF depending on slice position.
+            # This probably wont fix the 2d profile with very bad saturation at temporal rois,
+            # but could slightly make up for it.
+            # At the expense of increased SAR and possibly central brightening in inferior slices
+            # the overall decrease roughly follows a characteristic resembled by part of a sin function
+            slice_intensity_profile = np.sin(
+                np.linspace(0.9 * np.pi / 4, np.pi / 2, self.params.resolution_slice_num)
+                )
+            # since we want to make up for this intensity decrease towards lower slices we invert this profile
+            self.rf_slice_adaptive_scaling = 1 / slice_intensity_profile
 
     # __ public __
     # create
@@ -156,6 +172,15 @@ class Sequence(abc.ABC):
         self._check_interface_set()
         # write
         self.interface.save(save_file.as_posix().__str__())
+
+        name = f"z-adapt-rf_{name}"
+        save_file = path.joinpath(name).with_suffix(".json")
+        log_module.info(f"writing file: {save_file.as_posix()}")
+        j_dict = {
+            "rf_scaling_z": self.rf_slice_adaptive_scaling.tolist(),
+            "z_slice_idx": np.arange(self.params.resolution_slice_num).tolist()}
+        with open(save_file.as_posix(), "w") as j_file:
+            json.dump(j_dict, j_file, indent=2)
 
     def set_pyp_definitions(self):
         self.pp_seq.set_definition(
