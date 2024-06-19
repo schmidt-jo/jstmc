@@ -446,17 +446,18 @@ class Sequence(abc.ABC):
             k_start = k_central_phase - k_half_central_lines
             k_end = k_central_phase + k_half_central_lines
 
-            # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
-            # Trying random sampling, ie. pick random line numbers for remaining indices,
-            # we dont want to pick the same positive as negative phase encodes to account
-            # for conjugate symmetry in k-space.
-            # Hence, we pick from the positive indexes twice (thinking of the center as 0)
-            # without allowing for duplexes and negate half the picks
-            # calculate indexes
-            k_remaining = np.arange(0, k_start)
-            # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
-            weighting_factor = np.clip(self.params.sample_weighting, 0.01, 1)
-            if weighting_factor > 0.05:
+            # different sampling choices ["weighted_sampling", "interleaved_lines", "grappa"]
+            if self.params.sampling_pattern == "weighted_sampling":
+                # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
+                # Trying random sampling, ie. pick random line numbers for remaining indices,
+                # we dont want to pick the same positive as negative phase encodes to account
+                # for conjugate symmetry in k-space.
+                # Hence, we pick from the positive indexes twice (thinking of the center as 0)
+                # without allowing for duplexes and negate half the picks
+                # calculate indexes
+                k_remaining = np.arange(0, k_start)
+                # build array with dim [num_slices, num_outer_lines] to sample different random scheme per slice
+                weighting_factor = np.clip(self.params.sample_weighting, 0.01, 1)
                 log_module.info(f"\t\t-weighted random sampling of k-space phase encodes, factor: {weighting_factor}")
                 # random encodes for different echoes - random choice weighted towards center
                 weighting = np.clip(np.power(np.linspace(0, 1, k_start), weighting_factor), 1e-5, 1)
@@ -464,7 +465,7 @@ class Sequence(abc.ABC):
                 for idx_echo in range(self.params.etl):
                     # same encode for all echoes -> central lines
                     self.k_pe_indexes[idx_echo, :self.params.number_central_lines] = np.arange(k_start, k_end)
-
+                    # outer ones sampled from the density distribution weighting
                     k_indices = self.prng.choice(
                         k_remaining,
                         size=self.params.number_outer_lines,
@@ -474,6 +475,33 @@ class Sequence(abc.ABC):
                     )
                     k_indices[::2] = self.params.resolution_n_phase - 1 - k_indices[::2]
                     self.k_pe_indexes[idx_echo, self.params.number_central_lines:] = np.sort(k_indices)
+            elif self.params.sampling_pattern == "interleaved_lines":
+                # we want to skip a line per echo, to achieve complementary lines throughout the echo train
+                for idx_echo in range(self.params.etl):
+                    # same encode for all echoes -> central lines
+                    self.k_pe_indexes[idx_echo, :self.params.number_central_lines] = np.arange(k_start, k_end)
+                    # outer ones given by skipping lines
+                    # acc factor needs to be integer
+                    acc_fact = int(np.round(self.params.acceleration_factor))
+                    line_shift = int(idx_echo % acc_fact)
+                    k_indices = np.concatenate(
+                        (
+                            np.arange(line_shift, k_start, acc_fact),
+                            np.arange(k_end + line_shift, self.params.resolution_n_phase, acc_fact)
+                        )
+                    )
+                    # broadcast (from rounding errors)
+                    len_to_fill = self.k_pe_indexes[idx_echo, self.params.number_central_lines:].shape[0]
+                    if k_indices.shape[0] < len_to_fill:
+                        if line_shift < 2:
+                            # add end line
+                            k_indices = np.concatenate((k_indices, np.array([self.params.resolution_n_phase - 1])))
+                        else:
+                            # add start line
+                            k_indices = np.concatenate((k_indices, np.array([0])))
+                    elif k_indices.shape[0] > len_to_fill:
+                        k_indices = k_indices[:len_to_fill]
+                    self.k_pe_indexes[idx_echo, self.params.number_central_lines:] = k_indices
             else:
                 log_module.info(f"\t\t-grappa style alternating k-space phase encodes")
                 # same encode for all echoes -> central lines
