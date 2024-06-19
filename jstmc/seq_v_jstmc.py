@@ -406,8 +406,8 @@ class SeqJstmc(seq_baseclass.Sequence):
             fa_rad = self.params.refocusing_rf_rad_fa[echo_idx]
             phase_rad = self.params.refocusing_rf_rad_phase[echo_idx]
         flip = sbb.rf.t_duration_s / sbb.rf.signal.shape[0] * np.sum(np.abs(sbb.rf.signal)) * 2 * np.pi
-        # slice adaptive fa scaling
-        sbb.rf.signal *= fa_rad / flip * self.rf_slice_adaptive_scaling[slice_idx]
+        # slice adaptive fa scaling - we need true slice position here!
+        sbb.rf.signal *= fa_rad / flip * self.rf_slice_adaptive_scaling[self.trueSliceNum[slice_idx]]
         sbb.rf.phase_rad = phase_rad
 
     def _set_phase_grad(self, echo_idx: int, phase_idx: int):
