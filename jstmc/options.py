@@ -9,7 +9,7 @@ log_module = logging.getLogger(__name__)
 class Config:
     # Input sequence configuration
     i: str = sp.field(default="", alias="-c", help="Input Sequence Configuration")
-    s: str = sp.field(default="./default_config/system_specifications_7T_mpi_cbs.json",
+    s: str = sp.field(default="./default_config/system_specifications_7T_TerraX_mpi_cbs.json",
                       help="Input System Specifications")
     o: str = sp.field(default="", help="Output Path for .seq file and pypsi interface,"
                                        "reverts to input location if blank")

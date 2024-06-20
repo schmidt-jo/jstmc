@@ -340,22 +340,20 @@ class GRAD(Event):
         return grad_instance
 
     @classmethod
-    def make_slice_selective(
-            cls, pulse_bandwidth_hz: float, slice_thickness_m: float, duration_s: float,
+    def make_slice_selective(cls, pulse_bandwidth_hz: float, slice_thickness_m: float, duration_s: float,
             system: pp.Opts, pre_moment: float = 0.0, re_spoil_moment: float = 0.0,
             rephase: float = 0.0, t_minimum_re_grad: float = 0.0, adjust_ramp_area: float = 0.0):
         """
-        create slice selective gradient with merged pre and re moments (optional)
-        - one can set the minimum time for those symmetrical moments with t_minimum_re_grad to match other grad timings
-        - the rephase parameter gives control over rephasing the slice select moment in the re-moment.
-            It can be helpful to introduce correction factors: rephase = 1.0 will do
-            conventional rephasing of half of the slice select area.
-            From simulations it was found that eg. for one particular used slr pulse an increase of 8%
-            gives better phase properties. hence one could use rephase=1.08.
-        - adjust_ramp_area gives control over additional adjustments.
-            In the jstmc implementation this is used to account for the ramp area of a successive slice select pulse
+                create slice selective gradient with merged pre and re moments (optional)
+                - one can set the minimum time for those symmetrical moments with t_minimum_re_grad to match other grad timings
+                - the rephase parameter gives control over rephasing the slice select moment in the re-moment.
+                    It can be helpful to introduce correction factors: rephase = 1.0 will do
+                    conventional rephasing of half of the slice select area.
+                    From simulations it was found that eg. for one particular used slr pulse an increase of 8%
+                    gives better phase properties. hence one could use rephase=1.08.
+                - adjust_ramp_area gives control over additional adjustments.
+                    In the jstmc implementation this is used to account for the ramp area of a successive slice select pulse
         """
-
         # init
         grad_instance = cls()
         grad_instance.system = system
@@ -365,56 +363,8 @@ class GRAD(Event):
         amps = [0.0]
         times = [0.0]
         areas = []
-        # set ramp times to max grad/ slew rate + 2%. could be optimized timing wise!
-        t_ramp_unipolar = grad_instance.set_on_raster(1.02 * system.max_grad / system.max_slew)
-        t_ramp_bipolar = grad_instance.set_on_raster(2.04 * system.max_grad / system.max_slew)
+        # set minimum time on raster
         t_minimum_re_grad = grad_instance.set_on_raster(t_minimum_re_grad)
-
-        # calculations
-        def get_area_asym_grad(amp_h: float, time_h: float, time_htol: float, time_0toh: float = t_ramp_unipolar,
-                               amp_l: float = amplitude) -> float:
-            """
-            we want to calculate the area / moment from an asymmetric gradient part
-            """
-            area = 0.5 * time_0toh * amp_h + time_h * amp_h + 0.5 * (amp_h - amp_l) * time_htol + time_htol * amp_l
-            return area
-
-        def get_asym_grad_amplitude(
-                duration: float, moment: float,
-                t_asym_ramp: float = t_ramp_unipolar, t_zero_ramp: float = t_ramp_unipolar,
-                asym_amplitude: float = amplitude) -> float:
-            """
-            calculate the amplitude of re/pre gradient given ramp times to 0 and to the slice select amplitude,
-             respectively and a duration
-            """
-            area = moment - asym_amplitude * t_asym_ramp / 2
-            time = duration - t_asym_ramp / 2 - t_zero_ramp / 2
-            if time < 1e-7:
-                calc_amp = 0.0
-            else:
-                calc_amp = area / time
-            return calc_amp
-
-        def get_asym_grad_min_duration(max_amplitude: float, moment: float,
-                                       t_asym_ramp: float = t_ramp_unipolar, t_zero_ramp: float = t_ramp_unipolar,
-                                       asym_amplitude: float = amplitude) -> (float, float):
-            """
-            calculate the duration of the re/pre gradient given ramp times to 0 and slice select amplitude,
-             respectively and a maximal re/pre gradient amplitude
-            """
-            t_min_duration = grad_instance.set_on_raster(
-                (moment - asym_amplitude * t_asym_ramp / 2) / max_amplitude + t_asym_ramp / 2 + t_zero_ramp / 2
-            )
-            if np.abs(get_area_asym_grad(
-                    amp_h=max_amplitude, time_h=t_min_duration - t_asym_ramp - t_zero_ramp,
-                    time_htol=t_asym_ramp, time_0toh=t_zero_ramp, amp_l=asym_amplitude)) - np.abs(moment) > 0:
-                # absolute moment was increased, possibly due to np.ceil call in set raster time.
-                # apparent prolonging of timing, we can pull it back by slight decreasing of amplitude
-                max_amplitude = get_asym_grad_amplitude(
-                    duration=t_min_duration, moment=moment,
-                    t_asym_ramp=t_asym_ramp, t_zero_ramp=t_zero_ramp, asym_amplitude=asym_amplitude
-                )
-            return t_min_duration, max_amplitude
 
         # pre moment
         if np.abs(pre_moment) > 1e-7:
@@ -424,118 +374,118 @@ class GRAD(Event):
             if np.sign(pre_moment) != np.sign(amplitude):
                 log_module.error(f"pre-phase / spoil pre -- slice select not optimized for opposite sign grads")
                 # we can adopt here also with doubling the ramp times in case we have opposite signs
-            # want to minimize timing of gradient - use max grad
-            pre_grad_amplitude = np.sign(pre_moment) * system.max_grad
-            duration_pre_grad, pre_grad_amplitude = get_asym_grad_min_duration(max_amplitude=pre_grad_amplitude,
-                                                                               moment=pre_moment)
+
+            # (1) check if ramp to amplitude exceeds set area if using maximum slew
+            grad_instance._calc_check_single_ramp_area_vs_set_area(
+                area=pre_moment, amplitude=amplitude, identifier="pre-phasing / pre-spoil"
+            )
+
+            # (2) check if max grad and max slew already suffice in setting area
+            pre_grad_amplitude, t_flat = grad_instance._calc_check_double_ramp_area_vs_set_area(
+                area=pre_moment, amplitude=amplitude, identifier="pre-phasing / pre-spoil"
+            )
+
+            # (3) if we set times on gradient raster we might need to adopt gradient values
+            pre_grad_amplitude, t_ru, t_rd, t_flat = grad_instance._reset_amplitude_calc_ramps(
+                area=pre_moment, amplitude_to_set=pre_grad_amplitude, amplitude_fixed=amplitude, t_flat=t_flat
+            )
+
+            # (4) check if we have a requirement for the minimal time, if so we can possibly relax gradient stress
+            duration_pre_grad = t_ru + t_rd + t_flat
             if duration_pre_grad < t_minimum_re_grad:
-                # stretch to minimum required time
-                duration_pre_grad = t_minimum_re_grad
-                pre_grad_amplitude = get_asym_grad_amplitude(duration=duration_pre_grad, moment=pre_moment)
-            pre_t_flat = grad_instance.set_on_raster(duration_pre_grad - 2 * t_ramp_unipolar)
-            amps.extend([pre_grad_amplitude, pre_grad_amplitude, amplitude])
-            times.extend([t_ramp_unipolar, t_ramp_unipolar + pre_t_flat, duration_pre_grad])
+                # stretch to minimum required time if we have such
+                # update amplitude
+                b = - system.max_slew * t_minimum_re_grad + amplitude
+                c = amplitude**2 + system.max_slew * pre_moment
+                pre_grad_amplitude = -b / 2 + max(
+                        np.sqrt(b**2 - 4 * c), - np.sqrt(b**2 - 4 * c)
+                ) / 2
+                t_ru = grad_instance.set_on_raster(np.abs(pre_grad_amplitude) / system.max_slew)
+                t_rd = grad_instance.set_on_raster(np.abs(pre_grad_amplitude - amplitude) / system.max_grad)
+                t_flat = t_minimum_re_grad - t_ru - t_rd
+                pre_grad_amplitude, t_ru, t_rd, t_flat = grad_instance._reset_amplitude_calc_ramps(
+                    area=pre_moment, amplitude_to_set=pre_grad_amplitude, amplitude_fixed=amplitude, t_flat=t_flat
+                )
+
+            # (5) build gradient shape for prephasing grad
+            times.append(times[-1] + t_ru)
+            amps.append(pre_grad_amplitude)
+            if t_flat > 1e-7:
+                amps.append(pre_grad_amplitude)
+                times.append(times[-1] + t_flat)
+            times.append(times[-1] + t_rd)
+            amps.append(amplitude)
         else:
             # ramp up only, no pre moment
             duration_pre_grad = grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
-            times.append(duration_pre_grad)
+            times.append(times[-1] + duration_pre_grad)
             amps.append(amplitude)
+
         # flat part of slice select gradient. an rf would start here, hence save delay
         delay = times[-1] + rf_raster_delay
         amps.append(amplitude)
-        times.append(duration_pre_grad + duration_s)
+        times.append(times[-1] + duration_s)
         areas.append(amplitude * duration_s)
-        t = duration_pre_grad + duration_s
-        re_start_time = t
+        re_start_time = times[-1]
+
         # re / spoil moment
         if np.abs(re_spoil_moment) > 1e-7:
             if np.sign(re_spoil_moment) != np.sign(amplitude):
                 log_module.error(f"pre-phase / spoil pre -- slice select not optimized for opposite sign grads")
                 # we can adopt here also with doubling the ramp times in case we have opposite signs
-            t_ramp_asym = t_ramp_unipolar
             re_spoil_moment += - 0.5 * rephase * areas[-1]
             # very specific requirement jstmc sequence. adjust for ramp up of next slice selective gradient
             re_spoil_moment -= adjust_ramp_area
-            if np.sign(re_spoil_moment) != np.sign(amplitude):
-                # set up ramp for this case - just choose double the ramp time to account for complete gradient swing
-                t_ramp_asym = t_ramp_bipolar
             areas.append(re_spoil_moment)
-            if t_minimum_re_grad > 1e-6:
-                # duration given - use symmetrical timing : same time as re gradient
-                duration_re_grad = grad_instance.set_on_raster(t_minimum_re_grad)
-                if t_ramp_unipolar > duration_re_grad:
-                    err = "ramp times longer than available gradient time, slew rate limit"
-                    log_module.error(err)
-                    raise ValueError(err)
-                # we want to fit the pre moment into the given duration
-                # i.e. ramp 0 to pre_amplitude, flat time, ramp pre_amplitude to amplitude
-                re_grad_amplitude = get_asym_grad_amplitude(
-                    duration=duration_re_grad, moment=re_spoil_moment,
-                    t_asym_ramp=t_ramp_asym)
-                # but if that exceeds grad limit we need to prolong the time
-                if np.abs(re_grad_amplitude) > system.max_grad:
-                    re_grad_amplitude = np.sign(re_spoil_moment) * system.max_grad
-                    duration_re_grad, re_grad_amplitude = get_asym_grad_min_duration(
-                        max_amplitude=re_grad_amplitude, moment=re_spoil_moment, t_asym_ramp=t_ramp_asym)
-                re_t_flat = grad_instance.set_on_raster(duration_re_grad - t_ramp_unipolar - t_ramp_asym)
-                amps.extend([re_grad_amplitude, re_grad_amplitude])
-                times.extend([t + t_ramp_asym, t + t_ramp_asym + re_t_flat])
-            else:
-                # want to minimize timing of gradient - use max grad
-                re_grad_amplitude = np.sign(re_spoil_moment) * system.max_grad
-                duration_re_grad, re_grad_amplitude = get_asym_grad_min_duration(
-                    max_amplitude=re_grad_amplitude, moment=re_spoil_moment, t_asym_ramp=t_ramp_asym
+            # (1) check if ramp to amplitude exceeds set area if using maximum slew
+            grad_instance._calc_check_single_ramp_area_vs_set_area(
+                area=re_spoil_moment, amplitude=amplitude, identifier="re-phasing / spoil"
+            )
+
+            # (2) check if max grad and max slew already suffice in setting area
+            re_grad_amplitude, t_flat = grad_instance._calc_check_double_ramp_area_vs_set_area(
+                area=re_spoil_moment, amplitude=amplitude, identifier="re-phasing / spoil"
+            )
+
+            # (3) if we set times on gradient raster we might need to adopt gradient values
+            re_grad_amplitude, t_ru, t_rd, t_flat = grad_instance._reset_amplitude_calc_ramps(
+                area=re_spoil_moment, amplitude_to_set=re_grad_amplitude, amplitude_fixed=amplitude, t_flat=t_flat
+            )
+
+            # (4) check if we have a requirement for the minimal time, if so we can possibly relax gradient stress
+            duration_re_grad = t_ru + t_rd + t_flat
+            if duration_re_grad < t_minimum_re_grad:
+                # stretch to minimum required time if we have such
+                # update amplitude
+                b = - system.max_slew * t_minimum_re_grad + amplitude
+                c = amplitude ** 2 + system.max_slew * re_spoil_moment
+                re_grad_amplitude = -b / 2 + max(
+                    np.sqrt(b ** 2 - 4 * c), - np.sqrt(b ** 2 - 4 * c)
+                ) / 2
+                t_ru = grad_instance.set_on_raster(np.abs(re_grad_amplitude) / system.max_slew)
+                t_rd = grad_instance.set_on_raster(np.abs(re_grad_amplitude - amplitude) / system.max_grad)
+                t_flat = t_minimum_re_grad - t_ru - t_rd
+                re_grad_amplitude, t_ru, t_rd, t_flat = grad_instance._reset_amplitude_calc_ramps(
+                    area=re_spoil_moment, amplitude_to_set=re_grad_amplitude,
+                    amplitude_fixed=amplitude, t_flat=t_flat
                 )
-                re_t_flat = grad_instance.set_on_raster(duration_re_grad - t_ramp_asym - t_ramp_unipolar)
-                if re_t_flat > 1e-7:
-                    amps.extend([re_grad_amplitude, re_grad_amplitude])
-                    times.extend([t + t_ramp_asym, t + t_ramp_asym + re_t_flat])
-                else:
-                    # can happen with small moments, since above calculations not take into account 0 flat time
-                    # we need to recalculate the gradient needed for only the ramps.
-                    re_grad_amplitude = amplitude
-                    # sanity check if we can fit at all
-                    ramp_time = grad_instance.set_on_raster(np.abs(re_spoil_moment * 2 / re_grad_amplitude))
-                    min_ramp_time = grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
-                    if min_ramp_time > ramp_time:
-                        warn = f"rephasing area low, need only a ramp. " \
-                               f"ramp slew rate too high, revert to maximal possible" \
-                               f"-> can lead to slight deviations in ramp area! change spoiling gradient to avoid!"
-                        log_module.warning(warn)
-                        duration_re_grad = min_ramp_time
-                    else:
-                        # we have ramp time higher than minimal ramp time. need to distribute the area
-                        # to a ramp fitting raster timing. usually this creates a mismatch
-                        # so we try to stitch the ramp from two parts
-                        # we take a ramp time slightly higher than the one we need (10% bigger)
-                        ramp_time = grad_instance.set_on_raster(np.abs(1.1 * re_spoil_moment * 2 / re_grad_amplitude))
-                        # divide it into 2 subsections
-                        t1 = grad_instance.set_on_raster(np.abs(0.5 * ramp_time))
-                        t2 = ramp_time - t1
-                        # calculate the amplitude of the middle point to accommodate the area
-                        mid_amp = (areas[-1] / t1 - amplitude / 2) / (0.5 + 0.5 * t2 / t1)
-                        # set first part of ramp
-                        amps.extend([mid_amp])
-                        times.extend([t + t1])
-                        # second part is set by ramp down
-                        duration_re_grad = t1 + t2
-                        # sanity check. build area only with ramp, check if we match wanted area
-                        ramp_area = np.trapz(x=[0, t1, t1 + t2], y=[amplitude, mid_amp, 0])
-                        if np.abs(ramp_area - areas[-1]) > 1e-9:
-                            warn = (
-                                f"ramp area ({ramp_area:.2f}) not accommodating needed rephasing area ({areas[-1]:.2f})."
-                                f" This can be due to ramp time set on raster time. "
-                                f"Could be avoided with higher spoiling gradient. ")
-                            log_module.warning(warn)
-            t += duration_re_grad
+
+            # (5) build gradient shape for re/spoil grad
+            times.append(times[-1] + t_rd)
+            amps.append(re_grad_amplitude)
+            if t_flat > 1e-7:
+                amps.append(re_grad_amplitude)
+                times.append(times[-1] + t_flat)
+            times.append(times[-1] + t_ru)
+            amps.append(0.0)
         else:
-            t += grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
-        # ramp down
-        amps.append(0.0)
-        times.append(t)
+            # ramp down only, no re moment
+            duration_re_grad = grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
+            times.append(times[-1] + duration_re_grad)
+            amps.append(0.0)
 
         # end of re gradient
-        re_end_time = t
+        re_end_time = times[-1]
         duration_re_grad = float(re_end_time - re_start_time)
         amps = np.array(amps)
         times = np.array(times)
@@ -573,6 +523,42 @@ class GRAD(Event):
             raise ValueError(err)
 
         return grad_instance, delay, duration_re_grad
+
+
+    def _calc_check_single_ramp_area_vs_set_area(self, area: float, amplitude: float, identifier: str = ""):
+        a = amplitude ** 2 / 2 / self.system.max_slew
+        if np.abs(a) > np.abs(area) + 1e-5:
+            msg = (
+                "area cannot accommodated with maximum slew. "
+                "Area through ramps already exceeds set value. "
+                f"choose higher {identifier} moment"
+            )
+            log_module.error(msg)
+            raise ValueError(msg)
+
+    def _calc_check_double_ramp_area_vs_set_area(self, area: float, amplitude: float, identifier: str = ""):
+        a = (self.system.max_grad ** 2 - amplitude ** 2) / self.system.max_slew
+        if np.abs(a) > np.abs(area) + 1e-5:
+            # ramp parts of gradient already suffice to cover area, dont need flat gradient.
+            # need to update grad value to get correct area
+            grad_amplitude = np.sign(area) * np.sqrt(
+                np.abs(area) * self.system.max_slew + np.abs(amplitude) ** 2
+            )
+            t_flat = 0.0
+        else:
+            # fix gradient at max value and calculate flat time
+            grad_amplitude = self.system.max_grad
+            t_flat = self.set_on_raster((np.abs(area) - np.abs(a)) / np.abs(grad_amplitude))
+        return grad_amplitude, t_flat
+
+    def _reset_amplitude_calc_ramps(
+            self, area: float, amplitude_to_set: float, amplitude_fixed: float, t_flat: float = 0):
+        t_ru = self.set_on_raster(np.abs(amplitude_to_set) / self.system.max_slew)
+        t_rd = self.set_on_raster(np.abs(amplitude_to_set - amplitude_fixed) / self.system.max_slew)
+        t_flat = self.set_on_raster(t_flat)
+        a = area - 0.5 * t_rd * amplitude_fixed
+        b = 0.5 * t_ru + t_flat + 0.5 * t_rd
+        return a / b, t_ru, t_rd, t_flat
 
     @classmethod
     def sym_grad(cls, system: pp.Opts, channel: str = 'x', pre_delay: float = 0.0, area_lobe: float = 0.0,
