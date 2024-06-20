@@ -19,8 +19,8 @@ class Config:
     n: str = sp.field(default="jstmc", help="Sequence Name")
 
     d: bool = sp.field(default=False, help="Debug on/off")
-    t: str = sp.field(default="vespa", choices=["vespa", "mese_fidnav"], help="Sequence Type")
-    p: str = sp.field(default="png", choice=["png", "pdf", "html"], help="Plot file endings")
+    t: str = sp.field(default="vespa", choices=["vespa", "mese_fidnav", "spigraes_desmaq"], help="Sequence Type")
+    p: str = sp.field(default="pdf", choice=["png", "pdf", "html"], help="Plot file endings")
 
 
 def create_cli() -> Config:

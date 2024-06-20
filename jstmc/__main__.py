@@ -1,4 +1,4 @@
-from jstmc import options, seq_v_jstmc, seq_v_vespa, plotting
+from jstmc import options, seq_v_jstmc, seq_v_vespa, seq_v_sigraes_desmaq, plotting
 import numpy as np
 import logging
 import pathlib as plib
@@ -13,6 +13,8 @@ def main():
     # setup sequence algorithm
     if prog_args.t == "vespa":
         jstmc_seq = seq_v_vespa.SeqVespaGerd.from_cli(args=prog_args)
+    elif prog_args.t == "spigraes_desmaq":
+        jstmc_seq = seq_v_sigraes_desmaq.SeqSigraesDesmaq.from_cli(args=prog_args)
     elif prog_args.t == "mese_fidnav":
         jstmc_seq = seq_v_jstmc.SeqJstmc.from_cli(args=prog_args)
     else:

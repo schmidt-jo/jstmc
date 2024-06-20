@@ -109,6 +109,7 @@ class Kernel:
         # Excitation
         log_module.info("setup excitation")
         if use_slice_spoiling:
+            # using spoiling gradient defined by interface file
             spoiling_moment = pyp_interface.grad_moment_slice_spoiling
         else:
             spoiling_moment = 2e-7
