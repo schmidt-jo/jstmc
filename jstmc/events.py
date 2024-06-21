@@ -353,6 +353,7 @@ class GRAD(Event):
                     gives better phase properties. hence one could use rephase=1.08.
                 - adjust_ramp_area gives control over additional adjustments.
                     In the jstmc implementation this is used to account for the ramp area of a successive slice select pulse
+                - ensure arbitrary pulse-grad shape obeys rf dead time (rf cannot start before dead time delay)
         """
         # init
         grad_instance = cls()
@@ -416,10 +417,14 @@ class GRAD(Event):
             times.append(times[-1] + t_rd)
             amps.append(amplitude)
         else:
-            # ramp up only, no pre moment
-            duration_pre_grad = grad_instance.set_on_raster(np.abs(amplitude / system.max_slew))
+            # ramp up only, no pre moment, ensure at least rf dead time
+            duration_pre_grad = max(
+                grad_instance.set_on_raster(np.abs(amplitude / system.max_slew)),
+                grad_instance.set_on_raster(system.rf_dead_time)
+            )
             times.append(times[-1] + duration_pre_grad)
             amps.append(amplitude)
+            areas.append(np.trapz(x=times, y=amps))
 
         # flat part of slice select gradient. an rf would start here, hence save delay
         delay = times[-1] + rf_raster_delay

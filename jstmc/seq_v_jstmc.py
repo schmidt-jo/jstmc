@@ -41,10 +41,7 @@ class SeqJstmc(seq_baseclass.Sequence):
             read_gradient_to_prephase=self.block_acquisition.grad_read.area / 2
         )
         # calculate ramp area to slice select upon refocusing 1
-        ramp_area_ref_1 = np.trapz(
-            x=self.block_refocus_1.grad_slice.t_array_s[:2],
-            y=self.block_refocus_1.grad_slice.amplitude[:2]
-        )
+        ramp_area_ref_1 = float(self.block_refocus_1.grad_slice.area[0])
 
         self.block_excitation = kernels.Kernel.excitation_slice_sel(
             pyp_interface=self.params,
