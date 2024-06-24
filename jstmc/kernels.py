@@ -161,7 +161,7 @@ class Kernel:
                                 pulse_num: int = 0, duration_spoiler: float = 0.0, return_pe_time: bool = False,
                                 read_gradient_to_prephase: float = None):
         if read_gradient_to_prephase is None:
-            # calculate read gradient in order to use correct area (corrected for ramps
+            # calculate read gradient in order to use correct area (corrected for ramps)
             grad_read = events.GRAD.make_trapezoid(
                 channel=pyp_interface.read_dir, system=system,
                 flat_area=pyp_interface.delta_k_read * pyp_interface.resolution_n_read,
