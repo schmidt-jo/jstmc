@@ -11,7 +11,19 @@ import json
 log_module = logging.getLogger(__name__)
 
 
-class Sequence(abc.ABC):
+class Sequence2D(abc.ABC):
+    """
+    Base class for 2D sequences.
+    initializing some basic configuration shared for all 2d sequences, such as:
+    - slice sampling patterns (interleaved, sequential)
+    - slice adaptive scaling of rf (based on in vivo sampling scans)
+    - k-space sampling patterns (fs/pf in read, AC region + compementary or arbitrary encodes in phase direction
+    - random default generator seed 0, eg. for reproducing sampling patterns
+    - checking interface setting
+    - navigator toggling (navigators are set outside of the slice slab to not interfere with slice selection / TR
+        of slices to measure, they are epi style readouts with lower resolution and can be switched on here)
+
+    """
     def __init__(self, pypsi_params: pypsi.Params = pypsi.Params()):
 
         self.interface: pypsi.Params = pypsi_params
@@ -42,6 +54,10 @@ class Sequence(abc.ABC):
         # set exciation and refocusing at least to be present
         self.block_excitation: kernels.Kernel = NotImplemented
         self.block_refocus: kernels.Kernel = NotImplemented
+        # set up spoling at end of echo train
+        self.block_spoil_end: kernels.Kernel = kernels.Kernel.spoil_all_grads(
+            pyp_interface=self.params, system=self.pp_sys
+        )
         # register all pulses that need slice select
         self.kernel_pulses_slice_select: list = []
 
@@ -74,6 +90,16 @@ class Sequence(abc.ABC):
                 )
             # since we want to make up for this intensity decrease towards lower slices we invert this profile
             self.rf_slice_adaptive_scaling = 1 / slice_intensity_profile
+
+        # navigators
+        self.navs_on: bool =self.params.use_navs
+        self.nav_num: int = 0
+        self.nav_t_total: float = 0.0
+        # for now we fix the navigator resolution at 5 times coarser than the chosen resolution
+        # of scan read direction. Will be different from scan if not isotropic in plane is used
+        self.nav_resolution_factor: int = 5
+        if self.navs_on:
+            self._set_navigators()
 
     # __ public __
     # create
@@ -360,11 +386,18 @@ class Sequence(abc.ABC):
         )
         self.recon_params_set = True
 
-    @abc.abstractmethod
     def _set_nav_parameters(self):
         log_module.debug(f"set pypsi recon nav")
-        # to be implemented for each variant
-        pass
+        if self.params.use_navs:
+            # recon
+            self.interface.recon.set_navigator_params(
+                lines_per_nav=int(self.params.resolution_n_phase * self.nav_resolution_factor / 2),
+                num_of_nav=self.params.number_central_lines + self.params.number_outer_lines,
+                nav_acc_factor=2, nav_resolution_scaling=self.nav_resolution_factor,
+                num_of_navs_per_tr=2
+            )
+        else:
+            pass
 
     # emc
     def _set_emc_parameters(self):
@@ -516,6 +549,212 @@ class Sequence(abc.ABC):
             self.k_pe_indexes[:, :] = np.arange(
                 self.params.number_central_lines + self.params.number_outer_lines
             )
+
+    def _set_navigators(self):
+        # we use two navigators for now, at the end of each slice slab,
+        # could in principle make this gap dependent and acquire per gap if big enough to get a 3D nav volume
+        self.nav_num: int = 2
+        self.nav_resolution = self.params.resolution_voxel_size_read * self.nav_resolution_factor
+        self.nav_slice_thickness = self.params.resolution_slice_thickness * self.nav_resolution_factor
+
+        # create blocks
+        self.block_nav_excitation: kernels.Kernel = self._set_nav_excitation()
+        self.block_list_nav_acq: list = self._set_nav_acquisition()
+        self.id_acq_nav = "nav_acq"
+
+        if self.params.visualize:
+            self.block_nav_excitation.plot(path=self.interface.config.output_path, name="nav_excitation")
+
+            for k in range(3):
+                self.block_list_nav_acq[k].plot(path=self.interface.config.output_path, name=f"nav_acq_{k}")
+
+        # register sampling trajectories
+        # need 2 trajectory lines for navigators: plus + minus directions
+        # sanity check that pre-phasing for odd and even read lines are same, i.e. cycling correct
+        grad_read_exc_pre = np.sum(self.block_nav_excitation.grad_read.area)
+        grad_read_2nd_pre = grad_read_exc_pre + np.sum(
+            self.block_list_nav_acq[0].grad_read.area
+        )
+        grad_read_3rd_pre = grad_read_2nd_pre + np.sum(self.block_list_nav_acq[1].grad_read.area)
+        grad_read_4th_pre = grad_read_3rd_pre + np.sum(
+            self.block_list_nav_acq[2].grad_read.area
+        )
+        if np.abs(grad_read_exc_pre - grad_read_3rd_pre) > 1e-9:
+            err = f"navigator readout prephasing gradients of odd echoes do not coincide"
+            log_module.error(err)
+            raise ValueError(err)
+        if np.abs(grad_read_2nd_pre - grad_read_4th_pre) > 1e-9:
+            err = f"navigator readout prephasing gradients of even echoes do not coincide"
+            log_module.error(err)
+            raise ValueError(err)
+        # register trajectories
+        # odd
+        acq_nav_block = self.block_list_nav_acq[0]
+        self._register_k_trajectory(
+            acq_nav_block.get_k_space_trajectory(
+                pre_read_area=grad_read_exc_pre,
+                fs_grad_area=int(self.params.resolution_n_read / self.nav_resolution_factor) * self.params.delta_k_read
+            ),
+            identifier=f"{self.id_acq_nav}_odd"
+        )
+        # even
+        acq_nav_block = self.block_list_nav_acq[1]
+        self._register_k_trajectory(
+            acq_nav_block.get_k_space_trajectory(
+                pre_read_area=grad_read_2nd_pre,
+                fs_grad_area=int(self.params.resolution_n_read / self.nav_resolution_factor) * self.params.delta_k_read
+            ),
+            identifier=f"{self.id_acq_nav}_even"
+        )
+
+        # calculate timing
+        # time for fid navs - one delay in between
+        self.nav_t_total = np.sum(
+            [b.get_duration() for b in self.block_list_nav_acq]
+        ) + np.sum(
+            [b.get_duration() for b in self.block_list_nav_acq[:-1]]
+        )
+        log_module.info(f"\t\t-total fid-nav time (2 navs + 1 delay of 10ms): {self.nav_t_total * 1e3:.2f} ms")
+
+    def _set_nav_excitation(self) -> kernels.Kernel:
+        # use excitation kernel without spoiling - only rephasing
+        k_ex = kernels.Kernel.excitation_slice_sel(
+            pyp_interface=self.params,
+            system=self.pp_sys,
+            use_slice_spoiling=False
+        )
+        # set up prephasing gradient for fid readouts
+        # get timings
+        t_spoiling = np.sum(np.diff(k_ex.grad_slice.t_array_s[-4:]))
+        t_spoiling_start = k_ex.grad_slice.t_array_s[-4]
+        # get area - delta k stays equal since FOV doesnt change
+        num_samples_per_read = int(self.params.resolution_n_read / self.nav_resolution_factor)
+
+        grad_read_area = events.GRAD.make_trapezoid(
+            channel=self.params.read_dir, system=self.pp_sys,
+            flat_area=num_samples_per_read * self.params.delta_k_read,
+            flat_time=self.params.dwell * num_samples_per_read * self.params.oversampling
+        ).area
+        # need half of this area (includes ramps etc) to preaphse (negative)
+        grad_read_pre = events.GRAD.make_trapezoid(
+            channel=self.params.read_dir, system=self.pp_sys, area=-grad_read_area / 2,
+            duration_s=float(t_spoiling), delay_s=t_spoiling_start
+        )
+        k_ex.grad_read = grad_read_pre
+        return k_ex
+
+    def _set_nav_acquisition(self) -> list:
+        # want to use an EPI style readout with acceleration. i.e. skipping of every other line.
+        acceleration_factor = 2
+        # want to go center out. i.e:
+        # acquire line [0, 1, -2, 3, -4, 5 ...] etc i.e. acc_factor_th of the lines + 1,
+        pe_increments = np.arange(
+            1, int(self.params.resolution_n_phase / self.nav_resolution_factor), acceleration_factor
+        )
+        pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
+        # in general only nth of resolution
+        block_fid_nav = [kernels.Kernel.acquisition_fid_nav(
+            pyp_interface=self.params,
+            system=self.pp_sys,
+            line_num=k,
+            reso_degrading=1 / self.nav_resolution_factor
+        ) for k in range(int(self.params.resolution_n_phase / self.nav_resolution_factor / 2))]
+        # add spoiling
+        block_fid_nav.append(self.block_spoil_end)
+        # add delay
+        block_fid_nav.append(kernels.Kernel(system=self.pp_sys, delay=events.DELAY.make_delay(delay_s=10e-3)))
+        return block_fid_nav
+
+    def _nav_apply_slice_offset(self, idx_nav: int):
+        sbb = self.block_nav_excitation
+        # find the amplitude at time of RF pulse (assumes constant slice select amplitude)
+        grad_slice_amplitude_hz = sbb.grad_slice.amplitude[sbb.grad_slice.t_array_s >= sbb.rf.t_delay_s][0]
+        # want to set the navs outside of the slice profile with equal distance to the rest of slices
+        if idx_nav == 0:
+            # first nav below slice slab
+            z = np.min(self.z) - np.abs(np.diff(self.z)[0])
+        elif idx_nav == 1:
+            # second nav above slice slab
+            z = np.max(self.z) + np.abs(np.diff(self.z)[0])
+        else:
+            err = f"sequence setup for only 2 navigators outside slice slab, " \
+                  f"index {idx_nav} was given (should be 0 or 1)"
+            log_module.error(err)
+            raise ValueError(err)
+        sbb.rf.freq_offset_hz = grad_slice_amplitude_hz * z
+        # we are setting the phase of a pulse here into its phase offset var.
+        # To merge both: given phase parameter and any complex signal array data
+        sbb.rf.phase_offset_rad = sbb.rf.phase_rad - 2 * np.pi * sbb.rf.freq_offset_hz * sbb.rf.t_mid
+
+    def _loop_navs(self):
+        # loop through all navigators
+        for nav_idx in range(self.nav_num):
+            self._nav_apply_slice_offset(idx_nav=nav_idx)
+            # excitation
+            # add block
+            self.pp_seq.add_block(*self.block_nav_excitation.list_events_to_ns())
+            # epi style nav read
+            # we set up a counter to track the phase encode line, k-space center is half of num lines
+            line_counter = 0
+            central_line = int(self.params.resolution_n_phase / self.nav_resolution_factor / 2) - 1
+            # we set up the phase encode increments
+            pe_increments = np.arange(1, int(self.params.resolution_n_phase / self.nav_resolution_factor), 2)
+            pe_increments *= np.power(-1, np.arange(pe_increments.shape[0]))
+            # we loop through all fid nav blocks (whole readout)
+            for b_idx in range(self.block_list_nav_acq.__len__()):
+                # get the block
+                b = self.block_list_nav_acq[b_idx]
+                # if at the end we add a delay
+                if (nav_idx == 1) & (b_idx == self.block_list_nav_acq.__len__() - 1):
+                    self.pp_seq.add_block(self.delay_slice.to_simple_ns())
+                # otherwise we add the block
+                else:
+                    self.pp_seq.add_block(*b.list_events_to_ns())
+                # if we have a readout we write to sampling pattern file
+                # for navigators we want the 0th to have identifier 0, all minus directions have 1, all plus have 2
+                if b_idx % 2:
+                    nav_ident = "odd"
+                else:
+                    nav_ident = "even"
+                if b.adc.get_duration() > 0:
+                    # track which line we are writing from the incremental steps
+                    nav_line_pe = np.sum(pe_increments[:line_counter]) + central_line
+                    _ = self._write_sampling_pattern_entry(
+                        slice_num=nav_idx, pe_num=nav_line_pe, echo_num=0,
+                        acq_type=f"{self.id_acq_nav}_{nav_ident}",
+                        echo_type="gre-fid", nav_acq=True
+                    )
+                    line_counter += 1
+
+    def _set_slice_delay(self, t_total_etl: float):
+        """
+        want to return the slice delay calculated from the effective TR, effective t_etl and number of slices.
+        if we use navigators, the effective TR is the TR diminished by the time navigators take,
+        and an additional delay is inserted after the navigator block. the delay between navs is fixed.
+        """
+        # deminish TR by nav - blocks
+        tr_eff = self.params.tr * 1e-3 - self.nav_t_total
+        max_num_slices = int(np.floor(tr_eff / t_total_etl))
+        log_module.info(f"\t\t-total echo train length: {t_total_etl * 1e3:.2f} ms")
+        log_module.info(f"\t\t-desired number of slices: {self.params.resolution_slice_num}")
+        log_module.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
+        if self.params.resolution_slice_num > max_num_slices:
+            msg = f"increase TR or Concatenation needed"
+            log_module.error(msg)
+            raise ValueError(msg)
+        num_delays = self.params.resolution_slice_num
+        if self.params.use_navs:
+            # we want to add a delay additionally after nav block
+            num_delays += 1
+
+        self.delay_slice = events.DELAY.make_delay(
+            (tr_eff - self.params.resolution_slice_num * t_total_etl) / num_delays,
+            system=self.pp_sys
+        )
+        log_module.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
+        if not self.delay_slice.check_on_block_raster():
+            self.delay_slice.set_on_block_raster()
+            log_module.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
 
     def _apply_slice_offset(self, idx_slice: int):
         # set phase and freq offset for all slice select pulse gradient kernels

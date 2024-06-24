@@ -346,8 +346,8 @@ class Kernel:
                             line_num: int, reso_degrading: float = 1 / 6):
         if line_num == 0:
             log_module.info("setup FID Navigator")
-        # want 1/6th  of resolution of original image (i.e. if 0.7mm iso in read direction, we get 3.5 mm resolution)
-        # hence we need only 1/6th of the number of points with same delta k, want this to be divisible by 2
+        # want 1/nth  of resolution of original image (i.e. if 0.7mm iso in read direction, we get n*0.7 mm resolution)
+        # hence we need only 1/nth of the number of points with same delta k, want this to be divisible by 2
         # (center half line inclusion out)
         num_samples_per_read = int(pyp_interface.resolution_n_read * reso_degrading)
         pe_increments = np.arange(1, int(pyp_interface.resolution_n_phase * reso_degrading), 2)

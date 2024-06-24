@@ -8,7 +8,7 @@ import tqdm
 log_module = logging.getLogger(__name__)
 
 
-class SeqSigraesDesmaq(seq_baseclass.Sequence):
+class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
     def __init__(self, pypsi_params: pypsi.Params = pypsi.Params()):
         super().__init__(pypsi_params=pypsi_params)
 
@@ -46,10 +46,7 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence):
         # add id
         self.id_bd_acq: str = "bd_fs"
 
-        # spoiling at end of echo train
-        self.block_spoil_end: Kernel = Kernel.spoil_all_grads(
-            pyp_interface=self.params, system=self.pp_sys
-        )
+        # spoiling at end of echo train - modifications
         self._mod_spoiling_end()
 
         # refocusing
@@ -129,11 +126,6 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence):
             identifier=self.id_bd_acq
         )
 
-    # recon
-    def _set_nav_parameters(self):
-        # no navigators used
-        pass
-
     # emc
     def _fill_emc_info(self):
         t_rephase = (self.block_excitation.get_duration() -
@@ -199,22 +191,7 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence):
         t_post_etl = self.block_bd_acq.get_duration() / 2 + self.block_spoil_end.get_duration()
         # total echo train length
         t_total_etl = (t_pre_etl + t_etl + t_post_etl) * 1e3  # esp in ms
-        max_num_slices = int(np.floor(self.params.tr / t_total_etl))
-        log_module.info(f"\t\t-total echo train length: {t_total_etl:.2f} ms")
-        log_module.info(f"\t\t-desired number of slices: {self.params.resolution_slice_num}")
-        log_module.info(f"\t\t-possible number of slices within TR: {max_num_slices}")
-        if self.params.resolution_slice_num > max_num_slices:
-            time_missing = (self.params.resolution_slice_num - max_num_slices) * t_total_etl
-            log_module.info(f"increase TR or Concatenation needed. - need {time_missing:.2f} ms more")
-        self.delay_slice = events.DELAY.make_delay(
-            1e-3 * (self.params.tr - self.params.resolution_slice_num * t_total_etl) /
-            self.params.resolution_slice_num,
-            system=self.pp_sys
-        )
-        log_module.info(f"\t\t-time between slices: {self.delay_slice.get_duration() * 1e3:.2f} ms")
-        if not self.delay_slice.check_on_block_raster():
-            self.delay_slice.set_on_block_raster()
-            log_module.info(f"\t\t-adjusting TR delay to raster time: {self.delay_slice.get_duration() * 1e3:.2f} ms")
+        self._set_slice_delay(t_total_etl=t_total_etl)
 
     def _calculate_echo_timings(self):
         # have 2 * etl echoes
@@ -408,9 +385,11 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence):
             self.params.number_central_lines + self.params.number_outer_lines, desc="phase encodes"
         )
         # one loop for introduction and settling in, no adcs
-        _ = self._loop_slices(idx_pe_n=0, no_adc=True)
+        self._loop_slices(idx_pe_n=0, no_adc=True)
         for idx_n in line_bar:  # We have N phase encodes for all ETL contrasts
             self._loop_slices(idx_pe_n=idx_n)
+            if self.navs_on:
+                self._loop_navs()
 
     def _set_end_spoil_phase_grad(self):
         factor = np.array([0.5, 1.0, 0.5])
