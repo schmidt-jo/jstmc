@@ -480,7 +480,7 @@ class Sequence2D(abc.ABC):
             k_end = k_central_phase + k_half_central_lines
 
             # different sampling choices ["weighted_sampling", "interleaved_lines", "grappa"]
-            if self.params.sampling_pattern == "weighted_sampling":
+            if self.params.sampling_pattern.startswith("weighted"):
                 # The rest of the lines we will use tse style phase step blip between the echoes of one echo train
                 # Trying random sampling, ie. pick random line numbers for remaining indices,
                 # we dont want to pick the same positive as negative phase encodes to account
@@ -508,7 +508,7 @@ class Sequence2D(abc.ABC):
                     )
                     k_indices[::2] = self.params.resolution_n_phase - 1 - k_indices[::2]
                     self.k_pe_indexes[idx_echo, self.params.number_central_lines:] = np.sort(k_indices)
-            elif self.params.sampling_pattern == "interleaved_lines":
+            elif self.params.sampling_pattern.startswith("interleaved"):
                 # we want to skip a line per echo, to achieve complementary lines throughout the echo train
                 for idx_echo in range(self.params.etl):
                     # same encode for all echoes -> central lines

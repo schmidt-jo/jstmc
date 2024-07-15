@@ -231,7 +231,7 @@ class SeqVespaGerd(seq_baseclass.Sequence2D):
         # time from mid last gre til end
         t_post_etl = self.block_gre_acq.get_duration() / 2 + self.block_spoil_end.get_duration()
         # total echo train length
-        t_total_etl = (t_pre_etl + t_etl + t_post_etl) * 1e3  # esp in ms
+        t_total_etl = (t_pre_etl + t_etl + t_post_etl)
         self._set_slice_delay(t_total_etl=t_total_etl)
 
     def _calculate_echo_timings(self):
