@@ -542,12 +542,17 @@ class GRAD(Event):
             raise ValueError(msg)
 
     def _calc_check_double_ramp_area_vs_set_area(self, area: float, amplitude: float, identifier: str = ""):
-        a = (self.system.max_grad ** 2 - amplitude ** 2) / self.system.max_slew
+        """
+        calculate and check if area produced by max ramps already suffices to cover set area
+        """
+        # calculate area of two ramps from 0 to max amp to set amp.
+        a = (self.system.max_grad ** 2 - amplitude ** 2 / 2) / self.system.max_slew
+        # check if this area is bigger than set area
         if np.abs(a) > np.abs(area) + 1e-5:
             # ramp parts of gradient already suffice to cover area, dont need flat gradient.
             # need to update grad value to get correct area
             grad_amplitude = np.sign(area) * np.sqrt(
-                np.abs(area) * self.system.max_slew + np.abs(amplitude) ** 2
+                np.abs(area) * self.system.max_slew + np.abs(amplitude) ** 2 / 2
             )
             t_flat = 0.0
         else:
