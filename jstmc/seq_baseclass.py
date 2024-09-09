@@ -33,6 +33,7 @@ class Sequence2D(abc.ABC):
         self.pp_sys: pp.Opts = self._set_pp_sys_from_pypsi()
         self.pp_seq: pp.Sequence = self._set_pp_seq_from_pp_sys()
 
+        self.num_noise_scans: int = 10
         # track echoes
         self.te: list = []
 
@@ -313,7 +314,7 @@ class Sequence2D(abc.ABC):
         # build adc block
         acq = events.ADC.make_adc(system=self.pp_sys, num_samples=1000, dwell=self.params.dwell)
         # use 2 noise scans
-        for k in range(2):
+        for k in range(self.num_noise_scans):
             # add to sequence
             self.pp_seq.add_block(acq.to_simple_ns())
             # write as sampling entry

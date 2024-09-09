@@ -13,6 +13,9 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
         super().__init__(pypsi_params=pypsi_params)
 
         log_module.info(f"init sigraes desmaq algorithm")
+        # set number of GRE echoes beside SE
+        self.num_gre: int = 2
+        self.num_e_per_rf: int = 1 + self.num_gre
 
         # timing
         self.t_delay_exc_ref1: events.DELAY = events.DELAY()
@@ -35,11 +38,6 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
         # add id
         self.id_bu_acq: str = "bu_fs"
 
-        # gradient echo readouts, always have inverted gradient direction wrt to se readouts,
-        # - inverted gradient, k-space from right to left
-        # self.block_gre_acq, _ = Kernel.acquisition_sym_undersampled(
-        #     pyp_interface=self.params, system=self.pp_sys, invert_grad_dir=True
-        # )
         self.block_bd_acq = Kernel.acquisition_fs(
             pyp_params=self.params, system=self.pp_sys, invert_grad_read_dir=True
         )
@@ -164,7 +162,13 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
 
     def _mod_block_rewind_echo_read(self, sbb: Kernel):
         # need to rewind readout echo gradient
-        area_read = np.sum(self.block_bd_acq.grad_read.area)
+        if self.num_gre % 2 == 0:
+            # even number of GRE readouts after / before SE, we need to rewind the last bu grad
+            block_acq = self.block_bu_acq
+        else:
+            # odd number of GRE readouts after / before SE, we need to rewind the last bd grad
+            block_acq = self.block_bd_acq
+        area_read = np.sum(block_acq.grad_read.area)
         area_rewind = - 0.5 * area_read
         delta_t_first_grad_part = np.diff(sbb.grad_read.t_array_s[:4])
         amplitude = area_rewind / np.sum(np.array([0.5, 1.0, 0.5]) * delta_t_first_grad_part)
@@ -207,7 +211,7 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
                 self.block_refocus_1.rf.t_delay_s + self.block_refocus_1.rf.t_duration_s / 2)
             + self.block_bu_acq.get_duration() / 2)
         t_e2e = self.block_bu_acq.get_duration() / 2 + self.block_bd_acq.get_duration() / 2
-
+        # we need to add the e2e time for each additional GRE readout
         # echo time of first se is twice the bigger time of 1) between excitation and first ref
         # 2) between first ref and se
         esp_1 = 2 * np.max([t_exc_1ref, t_ref_e1])
@@ -220,12 +224,15 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
 
         # write echo times to array
         self.te.append(esp_1)
-        self.te.append(esp_1 + t_e2e)
-        for k in np.arange(2, self.params.etl * 2, 2):
+        for _ in range(self.num_gre):
+            self.te.append(self.te[-1] + t_e2e)
+        # after this a rf pulse is played out and we can iteratively add the rest of the echoes
+        for k in np.arange(self.num_e_per_rf, self.params.etl * self.num_e_per_rf, self.num_e_per_rf):
             # take last echo time (gre sampling after se) need to add time from gre to rf and from rf to gre (equal)
             self.te.append(self.te[k - 1] + 2 * t_ref_e1)
-            # take this time and add time between gre and se
-            self.te.append(self.te[k] + t_e2e)
+            # take this time and add time between gre and se / readout to readout
+            for _ in range(self.num_gre):
+                self.te.append(self.te[-1] + t_e2e)
         te_print = [f'{1000 * t:.2f}' for t in self.te]
         log_module.info(f"echo times: {te_print} ms")
         # deliberately set esp weird to catch it upon processing when dealing with vespa/megesse style sequence
@@ -295,37 +302,31 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
             aq_block_bu = self.block_bu_acq
             aq_block_bd = self.block_bd_acq
         # phase encodes are set up to be equal per echo
-        # add bu sampling
-        self.pp_seq.add_block(*aq_block_bu.list_events_to_ns())
+        # set echo type list
+        e_types = ["gre"] * self.num_gre
         if int(idx_echo % 2) == 0:
-            e_type = "se"
+            e_types.insert(0, "se")
         else:
-            e_type = "gre"
-        if not no_adc:
-            # write sampling pattern
-            _ = self._write_sampling_pattern_entry(
-                slice_num=self.trueSliceNum[idx_slice_loop],
-                pe_num=int(self.k_pe_indexes[idx_echo, idx_pe_loop]),
-                echo_num=2 * idx_echo,
-                acq_type=self.id_bu_acq, echo_type=e_type,
-                echo_type_num=idx_echo
-            )
+            e_types.append("se")
 
-        # add bd sampling
-        self.pp_seq.add_block(*aq_block_bd.list_events_to_ns())
-        if int(idx_echo % 2) == 0:
-            e_type = "gre"
-        else:
-            e_type = "se"
-        if not no_adc:
-            # write sampling pattern
-            _ = self._write_sampling_pattern_entry(
-                slice_num=self.trueSliceNum[idx_slice_loop],
-                pe_num=int(self.k_pe_indexes[idx_echo, idx_pe_loop]),
-                echo_num=2 * idx_echo + 1,
-                acq_type=self.id_bd_acq, echo_type=e_type,
-                echo_type_num=idx_echo
-            )
+        for num_readout in range(self.num_e_per_rf):
+            if int(num_readout % 2) == 0:
+                # add bu sampling
+                self.pp_seq.add_block(*aq_block_bu.list_events_to_ns())
+                id_acq = self.id_bu_acq
+            else:
+                # add bd sampling
+                self.pp_seq.add_block(*aq_block_bd.list_events_to_ns())
+                id_acq = self.id_bd_acq
+            if not no_adc:
+                # write sampling pattern
+                _ = self._write_sampling_pattern_entry(
+                    slice_num=self.trueSliceNum[idx_slice_loop],
+                    pe_num=int(self.k_pe_indexes[idx_echo, idx_pe_loop]),
+                    echo_num=self.num_e_per_rf * idx_echo + num_readout,
+                    acq_type=id_acq, echo_type=e_types[num_readout],
+                    echo_type_num=idx_echo
+                )
 
     def _loop_slices(self, idx_pe_n: int, no_adc: bool = False):
         for idx_slice in range(self.params.resolution_slice_num):
@@ -358,7 +359,7 @@ class SeqSigraesDesmaq(seq_baseclass.Sequence2D):
                 idx_echo=0, no_adc=no_adc
             )
 
-            # successive double echoes per rf
+            # successive num gre echoes per rf
             for echo_idx in np.arange(1, self.params.etl):
                 # set flip angle from param list
                 self._set_fa(rf_idx=echo_idx, slice_idx=idx_slice)
